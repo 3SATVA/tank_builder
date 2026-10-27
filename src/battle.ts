@@ -1,4 +1,4 @@
-import { createRivalController, type ShotView, type TankCommands } from "./control";
+import { createBotController, type BotTuning, type ShotView, type TankCommands } from "./control";
 import { el } from "./dom";
 import { CELL, cellCenter, listGuns } from "./geometry";
 import { applyRepair, damageInstance, nextRepair } from "./grid";
@@ -8,7 +8,6 @@ import {
   blockPlate,
   cloneGrid,
   createDefaultGrid,
-  createRivalLoadout,
   getModule,
   isAnchorCell,
   isCoreCell,
@@ -23,7 +22,6 @@ import type { ModuleKind } from "./types";
 
 const ARENA_W = 2000;
 const ARENA_H = 1400;
-const WIN_SCRAP = 50;
 const TURRET_TURN = 4.6;
 
 interface Pillar {
@@ -100,10 +98,17 @@ interface Floater {
 export interface BattleOptions {
   grid: (string | null)[][];
   hull: string;
+  rivalName: string;
+  rivalHull: string;
+  rivalGrid: (string | null)[][];
+  rivalTuning: BotTuning;
+  scrap: number;
   currency: number;
   onCurrency: (next: number) => void;
+  onWin: () => void;
   onExit: () => void;
   onGarage: () => void;
+  onRivals: () => void;
 }
 
 interface TankDebug {
@@ -159,7 +164,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   const fuelFill = el("span");
   fuelMeter.append(fuelFill);
   const rivalLabel = el("div", "meter-label");
-  rivalLabel.append(el("span", undefined, "Rival"), el("span", "meter-value", ""));
+  rivalLabel.append(el("span", undefined, options.rivalName), el("span", "meter-value", ""));
   const rivalMeter = el("div", "meter meter-rival");
   const rivalFill = el("span");
   rivalMeter.append(rivalFill);
@@ -188,8 +193,10 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   retry.type = "button";
   const garage = el("button", "btn", "Garage");
   garage.type = "button";
+  const rivals = el("button", "btn", "Rivals");
+  rivals.type = "button";
   const endActions = el("div", "end-actions");
-  endActions.append(retry, garage);
+  endActions.append(retry, rivals, garage);
   const endPanel = el("div", "end-panel");
   endPanel.append(endTitle, endCopy, endActions);
   endcard.append(endPanel);
@@ -200,7 +207,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   if (!ctx) throw new Error("Canvas unavailable");
   const context = ctx;
   const input = attachInput(moveStick.base, moveStick.knob, aimStick.base, aimStick.knob);
-  const rivalAi = createRivalController();
+  const rivalAi = createBotController(options.rivalTuning);
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   let bank = options.currency;
@@ -213,9 +220,8 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   let lastTime = 0;
   let stopped = false;
   let acc = 0;
-  const rivalLoadout = createRivalLoadout();
   let player = spawnTank("player", "You", playerBlueprint, 1000, 1080, 0, options.hull);
-  let rival = spawnTank("rival", "Rival", rivalLoadout.grid, 1040, 380, Math.PI, rivalLoadout.hull);
+  let rival = spawnTank("rival", options.rivalName, options.rivalGrid, 1040, 380, Math.PI, options.rivalHull);
   let shots: Shot[] = [];
   let particles: Particle[] = [];
   let floaters: Floater[] = [];
@@ -223,7 +229,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
 
   function boot(): void {
     player = spawnTank("player", "You", playerBlueprint, 1000, 1080, 0, options.hull);
-    rival = spawnTank("rival", "Rival", rivalLoadout.grid, 1040, 380, Math.PI, rivalLoadout.hull);
+    rival = spawnTank("rival", options.rivalName, options.rivalGrid, 1040, 380, Math.PI, options.rivalHull);
     shots = [];
     particles = [];
     floaters = [];
@@ -406,11 +412,12 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     phase = result;
     if (result === "win" && !paid) {
       paid = true;
-      bank += WIN_SCRAP;
+      bank += options.scrap;
       options.onCurrency(bank);
+      options.onWin();
     }
     endTitle.textContent = result === "win" ? "You won" : "Hull breached";
-    endCopy.textContent = result === "win" ? `${WIN_SCRAP} scrap banked.` : "The rival kept the field.";
+    endCopy.textContent = result === "win" ? `${options.scrap} scrap banked.` : `${options.rivalName} kept the field.`;
     endcard.hidden = false;
     sfxBoom();
   }
@@ -564,7 +571,8 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
         const x = center.x - size / 2;
         const y = center.y - size / 2;
         const mod = cellModule(id);
-        traceRoundRect(context, x, y, size, size, 4);
+        context.beginPath();
+        context.rect(x, y, size, size);
         context.fillStyle = mod?.color ?? "#141820";
         context.fill();
         context.lineWidth = mod?.id === "heavy-armor" ? 3.5 : 2;
@@ -869,6 +877,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   };
   exit.addEventListener("click", () => options.onExit());
   garage.addEventListener("click", () => options.onGarage());
+  rivals.addEventListener("click", () => options.onRivals());
   retry.addEventListener("click", () => boot());
   window.addEventListener("keydown", onKey);
 

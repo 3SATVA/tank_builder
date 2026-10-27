@@ -274,33 +274,3 @@ export function createDefaultGrid(hull = "standard"): (string | null)[][] {
   ];
 }
 
-export interface RivalLoadout {
-  hull: string;
-  grid: (string | null)[][];
-}
-
-/** Mostly the starter hull. Sometimes a heavy plate, a repair bay, a single medium cannon, or the rear turret. */
-export function createRivalLoadout(): RivalLoadout {
-  const roll = Math.random();
-  if (roll < 0.12) {
-    const grid = createDefaultGrid("standard");
-    grid[0][1] = "armor";
-    grid[0][3] = "armor";
-    grid[2][1] = "medium-cannon@2,1";
-    grid[3][1] = "medium-cannon@2,1";
-    grid[2][3] = null;
-    return { hull: "standard", grid };
-  }
-  if (roll < 0.28) {
-    const grid = createDefaultGrid("standard");
-    grid[0][2] = "heavy-armor";
-    return { hull: "standard", grid };
-  }
-  if (roll < 0.42) {
-    const grid = createDefaultGrid("standard");
-    grid[1][2] = "repair-bay";
-    return { hull: "standard", grid };
-  }
-  if (roll < 0.55) return { hull: "rear", grid: createDefaultGrid("rear") };
-  return { hull: "standard", grid: createDefaultGrid("standard") };
-}

@@ -51,6 +51,8 @@ export interface SaveData {
   hull: string;
   /** One layout per hull. Row 0 is the front. A cell is a module id, or `id@row,col` when several cells are one part. */
   layouts: Record<string, (string | null)[][]>;
+  /** How many rivals have been beaten in order. 0 leaves only Rookie open. */
+  botsBeaten: number;
 }
 
 export interface TankStats {

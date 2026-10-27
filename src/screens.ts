@@ -1,3 +1,4 @@
+import { BOTS, botOpen } from "./bots";
 import { el } from "./dom";
 import { canPlace, placeModule, removeInstance } from "./grid";
 import { iconSvg } from "./icons";
@@ -18,7 +19,7 @@ import { sfxTap } from "./sfx";
 import { computeStats } from "./stats";
 import type { ModuleDef, SaveData, ShopItem, TankStats } from "./types";
 
-export type ScreenId = "menu" | "garage" | "battle" | "shop";
+export type ScreenId = "menu" | "garage" | "battle" | "shop" | "bots";
 
 function scrapLabel(amount: number): string {
   return `${amount.toLocaleString()} scrap`;
@@ -41,7 +42,7 @@ export function renderMenu(save: SaveData, go: (screen: ScreenId) => void): HTML
   const actions = el("div", "menu-actions");
   actions.append(
     menuButton("Garage", "Build and refit the hull", () => go("garage")),
-    menuButton("Battle", "Duel another built tank", () => go("battle"), true),
+    menuButton("Battle", "Pick a rival and duel", () => go("bots"), true),
     menuButton("Shop", "Spend scrap on new blocks", () => go("shop")),
   );
 
@@ -372,6 +373,54 @@ function composition(save: SaveData): HTMLElement {
     .filter(Boolean);
   const line = el("p", "composition", parts.length > 0 ? parts.join(" · ") : "Empty hull — bolt blocks onto the bays.");
   return line;
+}
+
+export function renderBots(save: SaveData, go: (screen: ScreenId, botId?: string) => void): HTMLElement {
+  const root = el("div", "screen shop-screen");
+  const bar = el("header", "topbar");
+  const back = el("button", "btn btn-ghost", "Menu");
+  back.type = "button";
+  back.addEventListener("click", () => go("menu"));
+  bar.append(el("span", "brand", "Rivals"), scrapPill(save.currency), back);
+
+  const body = el("div", "shop-body");
+  const list = el("div", "bot-list");
+  for (const bot of BOTS) {
+    const open = botOpen(save.botsBeaten, bot);
+    const cleared = save.botsBeaten > bot.index;
+    const card = el("article", open ? "bot-card shop-card" : "bot-card shop-card locked");
+    card.dataset.bot = bot.id;
+    if (!open) card.dataset.locked = "true";
+    if (cleared) card.dataset.cleared = "true";
+    const top = el("div", "bot-card-top");
+    top.append(el("h3", undefined, bot.name), el("span", "bot-reward", `${bot.scrap} scrap`));
+    const foot = el("div", "bot-foot");
+    const state = el("div", "bot-state");
+    if (!open) {
+      const lock = el("span", "lock-icon");
+      lock.innerHTML =
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
+      state.append(lock, el("span", undefined, bot.index === 1 ? "Beat Rookie" : "Beat Veteran"));
+    } else if (cleared) {
+      state.append(el("span", undefined, "Cleared"));
+    } else {
+      state.append(el("span", undefined, "Open"));
+    }
+    const button = el("button", "btn btn-primary", open ? "Fight" : "Locked");
+    button.type = "button";
+    button.disabled = !open;
+    button.addEventListener("click", () => {
+      if (!open) return;
+      sfxTap();
+      go("battle", bot.id);
+    });
+    foot.append(state, button);
+    card.append(top, el("p", "shop-tagline", bot.blurb), foot);
+    list.append(card);
+  }
+  body.append(list);
+  root.append(bar, body);
+  return root;
 }
 
 export function renderShop(save: SaveData, go: (screen: ScreenId) => void, persist: () => void): HTMLElement {
