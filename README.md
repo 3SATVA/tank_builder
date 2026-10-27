@@ -10,9 +10,9 @@ npm run build
 
 ## Screens
 
-- **Garage** — tap a block in the palette, tap a bay to place it. Tap a bay that already holds that block to remove it. The top row is the front of the hull. The gold 3×3 in the middle is the turret; those bays are module slots too.
+- **Garage** — tap a block in the palette, tap a bay to place it. Tap a bay that already holds that block to remove it. The top row is the front of the hull. The gold 3×3 is the turret; those bays are module slots too. A hull switcher lists the chassis you own, and each hull keeps its own layout.
 - **Battle** — a 1v1 against another built tank. The rival is a bot today. It uses the same module grid and the same drive commands a remote player would send later.
-- **Shop** — scrap counter is live. The shelves are empty: “New modules coming soon.”
+- **Shop** — spend scrap from won duels. Each card shows the name, what the part does, its tradeoff, the price, and a Buy button. Bought blocks join the garage palette. The bought hull joins the switcher.
 
 ## Controls
 
@@ -37,12 +37,18 @@ Starter blocks, added on top of a bare core (70 core, 28 speed, 18 turning, 36 f
 | Fuel | +40 fuel |
 | Engine | +44 speed |
 | Cannon | 16 damage, 0.55 shots/s, uses 1 power |
+| Heavy armor | 96 plate, −30 speed, −12 turning. Shop, 150 scrap |
+| Repair bay | Restores the most hurt block, or rebuilds a destroyed one, every few seconds. Never the core. Draws 2 power while it is working. Shop, 200 scrap |
+| Medium cannon | 2 cells along the hull (this bay and the one behind it). 28 damage, longer range, 0.30 shots/s, uses 4 power. Both cells must be hull, or both inside the turret. Shop, 250 scrap |
+| Rear turret tank | Same 5×7 size with the 3×3 turret on the back three rows. Own layout. Shop, 300 scrap |
 
-The default hull is 5 blocks wide and 7 long, with the front row at the top. The long axis is forward: that is the way the hull drives and the way hull cannons fire. A centered 3×3 turret carries two of the four cannons; the other two sit on the front of the hull. The rest of the starter loadout is eight armor, four tracks, two engines, four fuel, and two power cells. Fire rate is the average of the guns still mounted, scaled by power. It drops when weapon demand is higher than supply, and hits zero with no power. An empty fuel tank crawls at a quarter speed.
+The default hull is 5 blocks wide and 7 long, with the front row at the top. The long axis is forward: that is the way the hull drives and the way hull cannons fire. A centered 3×3 turret carries two of the four cannons; the other two sit on the front of the hull. The rear-turret hull keeps the same footprint and moves the gold 3×3 to rows 5–7. The rest of the starter loadout is eight armor, four tracks, two engines, four fuel, and two power cells. Fire rate is the average of the guns still mounted, scaled by power. It drops when weapon demand is higher than supply, and hits zero with no power. An empty fuel tank crawls at a quarter speed. A repair bay spends power only while a block is hurt or missing.
 
-Saves use `tank-builder-save-v3`. An older wide or 5×3 layout keeps its scrap and unlocks, and the hull resets to the long default.
+Hitting either cell of a medium cannon damages that one gun. It pops off as a single part and frees both bays. Heavy armor is slower. The bot sometimes fields one of these parts, and sometimes the rear hull, on an otherwise ordinary loadout.
 
-New block types are another entry in `src/modules.ts`. Shop stock is the `SHOP_ITEMS` list, which is intentionally empty. A rival is `createRivalGrid()` plus a `TankController` in `src/control.ts`.
+Saves use `tank-builder-save-v4`, with one layout per hull. An older long-hull save keeps its scrap, unlocks, and 5×7 layout on the standard hull. A wide or 5×3 save keeps scrap and unlocks and gets a fresh standard hull.
+
+New block types are another entry in `src/modules.ts`. Shop stock is the `SHOP_ITEMS` list. A rival is `createRivalLoadout()` plus a `TankController` in `src/control.ts`.
 
 ## Hosting
 

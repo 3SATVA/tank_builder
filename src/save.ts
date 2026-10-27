@@ -1,15 +1,16 @@
-import { cloneGrid, createDefaultGrid, getModule, GRID_COLS, GRID_ROWS } from "./modules";
+import { cloneGrid, createDefaultGrid, getHull, getModule, GRID_COLS, GRID_ROWS, moduleIdOf } from "./modules";
 import type { SaveData, ShopItem } from "./types";
 
-const KEY = "tank-builder-save-v3";
-const OLD_KEYS = ["tank-builder-save-v2", "tank-builder-save-v1"];
+const KEY = "tank-builder-save-v4";
+const OLD_KEYS = ["tank-builder-save-v3", "tank-builder-save-v2", "tank-builder-save-v1"];
 
 function blank(currency = 0, unlocked: string[] = []): SaveData {
   return {
     version: 1,
     currency,
     unlocked,
-    grid: createDefaultGrid(),
+    hull: "standard",
+    layouts: { standard: createDefaultGrid("standard") },
   };
 }
 
@@ -29,40 +30,88 @@ function fitsCurrentTank(grid: (string | null)[][]): boolean {
   return grid.length === GRID_ROWS && grid[0]?.length === GRID_COLS;
 }
 
-function readCurrency(raw: Partial<SaveData> | null): number {
+function cleanGrid(grid: (string | null)[][]): (string | null)[][] {
+  return grid.map((row) => row.map((cell) => (cell && moduleIdOf(cell) ? cell : null)));
+}
+
+function readCurrency(raw: { currency?: unknown } | null): number {
   return raw && Number.isFinite(raw.currency) ? Math.max(0, Math.floor(raw.currency as number)) : 0;
 }
 
-function readUnlocked(raw: Partial<SaveData> | null): string[] {
+function readUnlocked(raw: { unlocked?: unknown } | null): string[] {
   if (!raw || !Array.isArray(raw.unlocked)) return [];
-  return raw.unlocked.filter((id): id is string => typeof id === "string" && Boolean(getModule(id)));
+  return raw.unlocked.filter(
+    (id): id is string => typeof id === "string" && Boolean(getModule(id) || getHull(id)),
+  );
 }
 
-/** Saves from the wide 7×5 or the older 5×3 keep scrap and unlocks, and get a fresh long hull. */
-function sanitize(raw: Partial<SaveData> | null): SaveData {
+function ownsHull(id: string, unlocked: readonly string[]): boolean {
+  const hull = getHull(id);
+  return Boolean(hull && (hull.starter || unlocked.includes(id)));
+}
+
+interface RawSave {
+  currency?: unknown;
+  unlocked?: unknown;
+  hull?: unknown;
+  layouts?: unknown;
+  grid?: unknown;
+}
+
+function layoutFrom(value: unknown): (string | null)[][] | null {
+  if (!isGrid(value) || !fitsCurrentTank(value)) return null;
+  return cleanGrid(value);
+}
+
+function sanitize(raw: RawSave | null): SaveData {
   const currency = readCurrency(raw);
   const unlocked = readUnlocked(raw);
-  if (!raw || !isGrid(raw.grid) || !fitsCurrentTank(raw.grid)) {
-    return blank(currency, unlocked);
+  const layouts: Record<string, (string | null)[][]> = {};
+  if (raw && raw.layouts && typeof raw.layouts === "object") {
+    for (const [id, grid] of Object.entries(raw.layouts as Record<string, unknown>)) {
+      if (!ownsHull(id, unlocked)) continue;
+      const clean = layoutFrom(grid);
+      if (clean) layouts[id] = clean;
+    }
   }
-  const grid = raw.grid.map((row) => row.map((id) => (id && getModule(id) ? id : null)));
-  return { version: 1, currency, unlocked, grid };
+  if (!layouts.standard) {
+    const legacy = raw ? layoutFrom(raw.grid) : null;
+    layouts.standard = legacy ?? createDefaultGrid("standard");
+  }
+  let hull = typeof raw?.hull === "string" && ownsHull(raw.hull, unlocked) ? raw.hull : "standard";
+  if (!layouts[hull]) layouts[hull] = createDefaultGrid(hull);
+  for (const id of unlocked) {
+    if (getHull(id) && !layouts[id]) layouts[id] = createDefaultGrid(id);
+  }
+  return { version: 1, currency, unlocked, hull, layouts };
+}
+
+export function activeLayout(save: SaveData): (string | null)[][] {
+  const grid = save.layouts[save.hull];
+  if (grid && fitsCurrentTank(grid)) return grid;
+  const fresh = createDefaultGrid(save.hull);
+  save.layouts[save.hull] = fresh;
+  return fresh;
 }
 
 export function loadSave(): SaveData {
   try {
     const current = localStorage.getItem(KEY);
     if (current) {
-      const parsed = JSON.parse(current) as Partial<SaveData>;
+      const parsed = JSON.parse(current) as RawSave;
       const save = sanitize(parsed);
-      if (!parsed.grid || !isGrid(parsed.grid) || !fitsCurrentTank(parsed.grid)) saveGame(save);
+      const legacyOnly = !parsed.layouts || !parsed.hull;
+      if (legacyOnly) saveGame(save);
       return save;
     }
     for (const key of OLD_KEYS) {
       const legacy = localStorage.getItem(key);
       if (!legacy) continue;
-      const migrated = sanitize(JSON.parse(legacy) as Partial<SaveData>);
-      migrated.grid = createDefaultGrid();
+      const parsed = JSON.parse(legacy) as RawSave;
+      const migrated = sanitize(parsed);
+      const kept = layoutFrom(parsed.grid);
+      migrated.hull = "standard";
+      migrated.layouts = { standard: kept ?? createDefaultGrid("standard") };
       for (const stale of OLD_KEYS) localStorage.removeItem(stale);
       saveGame(migrated);
       return migrated;
@@ -74,22 +123,44 @@ export function loadSave(): SaveData {
 }
 
 export function saveGame(data: SaveData): void {
+  const layouts: SaveData["layouts"] = {};
+  for (const [id, grid] of Object.entries(data.layouts)) {
+    if (!ownsHull(id, data.unlocked)) continue;
+    layouts[id] = cloneGrid(grid);
+  }
+  if (!layouts.standard) layouts.standard = createDefaultGrid("standard");
+  const hull = ownsHull(data.hull, data.unlocked) && layouts[data.hull] ? data.hull : "standard";
+  if (!layouts[hull]) layouts[hull] = createDefaultGrid(hull);
   const payload: SaveData = {
     version: 1,
     currency: Math.max(0, Math.floor(data.currency)),
     unlocked: [...data.unlocked],
-    grid: cloneGrid(data.grid),
+    hull,
+    layouts,
   };
+  data.hull = hull;
+  data.layouts = layouts;
   localStorage.setItem(KEY, JSON.stringify(payload));
 }
 
-/** Ready for when SHOP_ITEMS is filled in. Returns false if the player can't buy it. */
+function shopId(item: ShopItem): string {
+  return item.kind === "module" ? item.moduleId : item.hullId;
+}
+
+/** Spends scrap on a module or a hull. Returns false if it is already owned or unaffordable. */
 export function purchase(save: SaveData, item: ShopItem): boolean {
-  if (save.unlocked.includes(item.moduleId)) return false;
+  const id = shopId(item);
+  if (save.unlocked.includes(id)) return false;
   if (save.currency < item.cost) return false;
-  const mod = getModule(item.moduleId);
-  if (!mod || mod.starter) return false;
+  if (item.kind === "module") {
+    const mod = getModule(id);
+    if (!mod || mod.starter) return false;
+  } else {
+    const hull = getHull(id);
+    if (!hull || hull.starter) return false;
+    if (!save.layouts[id]) save.layouts[id] = createDefaultGrid(id);
+  }
   save.currency -= item.cost;
-  save.unlocked.push(item.moduleId);
+  save.unlocked.push(id);
   return true;
 }

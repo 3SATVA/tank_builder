@@ -10,6 +10,14 @@ const PATHS: Record<ModuleKind, string> = {
   weapon: '<path d="M7.5 13.5h9v6h-9z"/><path d="M10.2 13.5V4.2h3.6v9.3"/>',
 };
 
-export function iconSvg(kind: ModuleKind): string {
-  return `<svg viewBox="0 0 24 24" aria-hidden="true">${PATHS[kind]}</svg>`;
+const BY_ID: Record<string, string> = {
+  "heavy-armor":
+    '<path d="M5 4h14v8c0 4-3 6.8-7 8.6C8 18.8 5 16 5 12V4z"/><path d="M8 8h.5M12 8h.5M16 8h.5M8 12h.5M12 12h.5M16 12h.5"/>',
+  "repair-bay": '<path d="M12 4.5v15M4.5 12h15"/><circle cx="12" cy="12" r="3.2"/>',
+  "medium-cannon": '<path d="M6 15h12v5.2H6z"/><path d="M9.2 15V2.8h5.6V15"/>',
+};
+
+export function iconSvg(kind: ModuleKind, id?: string): string {
+  const body = (id && BY_ID[id]) || PATHS[kind];
+  return `<svg viewBox="0 0 24 24" aria-hidden="true">${body}</svg>`;
 }

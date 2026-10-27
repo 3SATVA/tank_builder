@@ -27,21 +27,30 @@ export interface ModuleDef {
   /** Short stat line shown on the palette card. */
   blurb: string;
   stats: ModuleStats;
+  /** Footprint along the hull. Row 0 of the footprint is the front. Defaults to 1×1. */
+  rows?: number;
+  cols?: number;
+  /** Plate HP for this block. Armor uses this instead of the shared armor plate. */
+  plate?: number;
+  /** Seconds a shot from this weapon stays alive. Defaults to the small-cannon range. */
+  shotLife?: number;
+  /** Draws power and fixes other blocks while something on the tank is hurt. */
+  repairs?: boolean;
 }
 
-export interface ShopItem {
-  moduleId: string;
-  cost: number;
-  tagline: string;
-}
+export type ShopItem =
+  | { kind: "module"; moduleId: string; cost: number; name: string; tagline: string }
+  | { kind: "hull"; hullId: string; cost: number; name: string; tagline: string };
 
 export interface SaveData {
   version: 1;
   currency: number;
-  /** Module ids unlocked from the shop, not including starters. */
+  /** Module and hull ids unlocked from the shop, not including starters. */
   unlocked: string[];
-  /** Row 0 is the front of the hull. Cells hold a module id or null. */
-  grid: (string | null)[][];
+  /** Which owned hull is open in the garage and driven in battle. */
+  hull: string;
+  /** One layout per hull. Row 0 is the front. A cell is a module id, or `id@row,col` when several cells are one part. */
+  layouts: Record<string, (string | null)[][]>;
 }
 
 export interface TankStats {

@@ -1,5 +1,5 @@
 import { mountBattle } from "./battle";
-import { loadSave, saveGame } from "./save";
+import { activeLayout, loadSave, saveGame } from "./save";
 import { renderGarage, renderMenu, renderShop, type ScreenId } from "./screens";
 import { unlockAudio } from "./sfx";
 import "./style.css";
@@ -35,7 +35,8 @@ function show(screen: ScreenId): void {
   host.className = "screen battle-screen";
   app.replaceChildren(host);
   stopBattle = mountBattle(host, {
-    grid: save.grid.map((row) => row.slice()),
+    grid: activeLayout(save).map((row) => row.slice()),
+    hull: save.hull,
     currency: save.currency,
     onCurrency: (value) => {
       save.currency = value;
