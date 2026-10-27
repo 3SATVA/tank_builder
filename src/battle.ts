@@ -9,6 +9,7 @@ import {
   createDefaultGrid,
   createRivalGrid,
   getModule,
+  isCoreCell,
   isTurretCell,
   turretOrigin,
   TURRET_SIZE,
@@ -101,11 +102,17 @@ interface TankDebug {
   turret: number;
   core: number;
   fuel: number;
+  speed: number;
   shots: number;
   phase: "play" | "win" | "lose";
   guns: Array<"hull" | "turret">;
+  modules: number;
   rivalCore: number;
+  rivalModules: number;
   rivalTurret: number;
+  rivalX: number;
+  rivalY: number;
+  lastVolley: Array<{ mount: "hull" | "turret"; angle: number }>;
 }
 
 declare global {
@@ -194,15 +201,16 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   let lastTime = 0;
   let stopped = false;
   let acc = 0;
-  let player = spawnTank("player", "You", playerBlueprint, 960, 1040, 0);
-  let rival = spawnTank("rival", "Rival", createRivalGrid(), 1040, 400, Math.PI);
+  let player = spawnTank("player", "You", playerBlueprint, 1000, 1080, 0);
+  let rival = spawnTank("rival", "Rival", createRivalGrid(), 1040, 380, Math.PI);
   let shots: Shot[] = [];
   let particles: Particle[] = [];
   let floaters: Floater[] = [];
+  let lastVolley: TankDebug["lastVolley"] = [];
 
   function boot(): void {
-    player = spawnTank("player", "You", playerBlueprint, 960, 1040, 0);
-    rival = spawnTank("rival", "Rival", createRivalGrid(), 1040, 400, Math.PI);
+    player = spawnTank("player", "You", playerBlueprint, 1000, 1080, 0);
+    rival = spawnTank("rival", "Rival", createRivalGrid(), 1040, 380, Math.PI);
     shots = [];
     particles = [];
     floaters = [];
@@ -293,6 +301,12 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
         color: tank.id === "player" ? "#8ef6ea" : "#ffb0a0",
       });
     }
+    if (tank.id === "player") {
+      lastVolley = guns.map((gun) => ({
+        mount: gun.mount,
+        angle: gun.mount === "turret" ? tank.turret : tank.angle,
+      }));
+    }
     if (shots.length > 80) shots.splice(0, shots.length - 80);
     tank.flash = 0.06;
     if (tank.id === "player") sfxShot();
@@ -301,32 +315,33 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   function strike(tank: Tank, shot: Shot): boolean {
     const rows = tank.grid.length;
     const cols = tank.grid[0]?.length ?? 0;
-    let best: { r: number; c: number; d: number } | null = null;
+    let best: { r: number; c: number; d: number; turret: boolean } | null = null;
     for (let r = 0; r < rows; r += 1) {
       for (let c = 0; c < cols; c += 1) {
-        if (!tank.grid[r][c]) continue;
-        const angle = isTurretCell(r, c, cols, rows) ? tank.turret : tank.angle;
-        const local = worldToLocal(shot.x - tank.x, shot.y - tank.y, angle);
+        const turret = isTurretCell(r, c, cols, rows);
+        const angle = turret ? tank.turret : tank.angle;
+        if (!shotInCell(tank, shot, r, c, angle)) continue;
         const center = cellCenter(c, r, cols, rows);
-        const half = CELL * 0.46 + shot.r;
-        if (Math.abs(local.x - center.x) > half || Math.abs(local.y - center.y) > half) continue;
+        const local = worldToLocal(shot.x - tank.x, shot.y - tank.y, angle);
         const dist = Math.hypot(local.x - center.x, local.y - center.y);
-        if (!best || dist < best.d) best = { r, c, d: dist };
+        if (!best || dist < best.d) best = { r, c, d: dist, turret };
       }
     }
-    if (best) {
+    if (!best) return false;
+    if (tank.grid[best.r][best.c]) {
       hurtCell(tank, best.r, best.c, shot.damage);
       sfxHit();
       return true;
     }
-    if (insideFootprint(tank, shot.x, shot.y)) {
-      tank.core -= shot.damage;
-      tank.flash = 0.12;
-      sfxHit();
-      if (!reduceMotion) shake = Math.min(8, shake + (tank.id === "player" ? 3 : 1));
-      return true;
-    }
-    return false;
+    if (!best.turret) return false;
+    tank.core -= shot.damage;
+    tank.flash = 0.12;
+    sfxHit();
+    const center = cellCenter(best.c, best.r, cols, rows);
+    const world = localToWorld(center.x, center.y, tank.turret);
+    floaters.push({ x: tank.x + world.x, y: tank.y + world.y, text: "Core hit", life: 0.7 });
+    if (!reduceMotion) shake = Math.min(8, shake + (tank.id === "player" ? 3 : 1));
+    return true;
   }
 
   function hurtCell(tank: Tank, row: number, col: number, amount: number): void {
@@ -514,6 +529,12 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
         context.lineWidth = 2;
         context.strokeStyle = "#0e1116";
         context.stroke();
+        if (isCoreCell(r, c, cols, rows)) {
+          context.fillStyle = "#ff5d5d";
+          context.beginPath();
+          context.arc(x + size - 5, y + size - 5, 2.4, 0, Math.PI * 2);
+          context.fill();
+        }
         if (!id || !mod) continue;
         context.fillStyle = "rgba(255,255,255,0.22)";
         context.fillRect(x + 3, y + 3, size - 6, 4);
@@ -690,11 +711,17 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       turret: player.turret,
       core: player.core,
       fuel: player.fuel,
+      speed: computeStats(player.grid).speed,
       shots: shots.length,
       phase,
       guns: listGuns(player.grid).map((gun) => gun.mount),
+      modules: player.grid.flat().filter(Boolean).length,
       rivalCore: rival.core,
+      rivalModules: rival.grid.flat().filter(Boolean).length,
       rivalTurret: rival.turret,
+      rivalX: rival.x,
+      rivalY: rival.y,
+      lastVolley,
     });
   }
 
@@ -799,18 +826,13 @@ function defeated(tank: Tank): boolean {
   return !tank.grid.some((row) => row.some((cell) => cell));
 }
 
-function insideFootprint(tank: Tank, x: number, y: number): boolean {
+function shotInCell(tank: Tank, shot: Shot, row: number, col: number, angle: number): boolean {
   const cols = tank.grid[0]?.length ?? 1;
   const rows = tank.grid.length;
-  const hull = worldToLocal(x - tank.x, y - tank.y, tank.angle);
-  if (Math.abs(hull.x) <= (cols * CELL) / 2 && Math.abs(hull.y) <= (rows * CELL) / 2) return true;
-  const local = worldToLocal(x - tank.x, y - tank.y, tank.turret);
-  const origin = turretOrigin(cols, rows);
-  const top = cellCenter(origin.c, origin.r, cols, rows);
-  const x0 = top.x - CELL / 2;
-  const y0 = top.y - CELL / 2;
-  const span = TURRET_SIZE * CELL;
-  return local.x >= x0 && local.x <= x0 + span && local.y >= y0 && local.y <= y0 + span;
+  const local = worldToLocal(shot.x - tank.x, shot.y - tank.y, angle);
+  const center = cellCenter(col, row, cols, rows);
+  const half = CELL * 0.46 + shot.r;
+  return Math.abs(local.x - center.x) <= half && Math.abs(local.y - center.y) <= half;
 }
 
 function shotView(shot: Shot): ShotView {

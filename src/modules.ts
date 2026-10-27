@@ -14,7 +14,7 @@ export const MODULES: readonly ModuleDef[] = [
     name: "Armor",
     starter: true,
     color: "#6f93b5",
-    blurb: "32 plate",
+    blurb: "48 plate",
     stats: {},
   },
   {
@@ -89,8 +89,8 @@ export const BASE_HULL = {
 export const GRID_COLS = 7;
 export const GRID_ROWS = 5;
 export const TURRET_SIZE = 3;
-export const ARMOR_PLATE = 32;
-export const MODULE_PLATE = 16;
+export const ARMOR_PLATE = 48;
+export const MODULE_PLATE = 32;
 
 /** Top-left cell of the centered 3×3 turret. */
 export function turretOrigin(cols = GRID_COLS, rows = GRID_ROWS): { c: number; r: number } {
@@ -103,6 +103,12 @@ export function turretOrigin(cols = GRID_COLS, rows = GRID_ROWS): { c: number; r
 export function isTurretCell(row: number, col: number, cols = GRID_COLS, rows = GRID_ROWS): boolean {
   const origin = turretOrigin(cols, rows);
   return col >= origin.c && col < origin.c + TURRET_SIZE && row >= origin.r && row < origin.r + TURRET_SIZE;
+}
+
+/** Center of the 3×3. A block here soaks first; an empty center takes core damage. */
+export function isCoreCell(row: number, col: number, cols = GRID_COLS, rows = GRID_ROWS): boolean {
+  const origin = turretOrigin(cols, rows);
+  return row === origin.r + 1 && col === origin.c + 1;
 }
 
 /** How much damage a block soaks before it pops off. Armor soaks more than anything else. */

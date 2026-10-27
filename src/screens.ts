@@ -1,6 +1,6 @@
 import { el } from "./dom";
 import { iconSvg } from "./icons";
-import { createDefaultGrid, getModule, isTurretCell, modulesFor, SHOP_ITEMS } from "./modules";
+import { createDefaultGrid, getModule, isCoreCell, isTurretCell, modulesFor, SHOP_ITEMS } from "./modules";
 import { purchase } from "./save";
 import { sfxTap } from "./sfx";
 import { computeStats } from "./stats";
@@ -131,7 +131,7 @@ function buildStage(
     el(
       "p",
       "hint",
-      "Pick a block, tap a bay to place it. Tap a bay that already holds that block to pull it off. The gold 3×3 is the turret — it rotates toward your aim. Guns on the hull fire the way the hull faces.",
+      "Pick a block, tap a bay to place it. Tap a bay that already holds that block to pull it off. The gold 3×3 is the turret — it rotates toward your aim. Guns on the hull fire the way the hull faces. A shot through a hole in the turret hits the core.",
     ),
   );
 
@@ -150,6 +150,7 @@ function buildStage(
       const turret = isTurretCell(r, c, cols, rows);
       const cell = el("button", mod ? "cell filled" : "cell empty");
       if (turret) cell.classList.add("turret");
+      if (isCoreCell(r, c, cols, rows)) cell.classList.add("core");
       cell.type = "button";
       cell.style.setProperty("--cell", mod?.color ?? "transparent");
       if (mod && mod.id === selected) cell.classList.add("matches");

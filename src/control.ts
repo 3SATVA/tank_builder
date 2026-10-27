@@ -56,7 +56,7 @@ export function createRivalController(): TankController {
       const dx = foe.x - ctx.self.x;
       const dy = foe.y - ctx.self.y;
       const dist = Math.hypot(dx, dy) || 1;
-      const aim = Math.atan2(dx, -dy);
+      const aim = Math.atan2(dx, -dy) + Math.sin(weave * 2.4) * 0.22;
 
       let face = aim;
       let forward = 0.85;

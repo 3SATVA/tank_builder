@@ -27,7 +27,7 @@ Right stick rotates the 3×3 turret toward that direction and fires every powere
 
 ## Modules
 
-Starter blocks, added on top of a bare core (70 core, 28 speed, 18 turning, 36 fuel). Armor does not add core HP. Each armor block soaks 32 damage on its own cell; every other block soaks 16. A hit that lands on an empty bay, or overflow past a broken plate, comes off the core. The tank is out when the core hits zero or every block is gone. Lost blocks change speed, turning, fuel, power, and guns immediately.
+Starter blocks, added on top of a bare core (70 core, 28 speed, 18 turning, 36 fuel). Armor does not add core HP. Each armor block soaks 48 damage on its own cell; every other block soaks 32. Overflow past a broken plate comes off the core. A shot that lands in an empty turret bay also hits the core, so opening a hole in the gold 3×3 is how you finish a tank. The tank is out when the core hits zero or every block is gone. Lost blocks change speed, turning, fuel, power, and guns immediately.
 
 | Block | Effect |
 | --- | --- |
