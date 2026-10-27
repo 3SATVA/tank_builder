@@ -11,7 +11,7 @@ npm run build
 ## Screens
 
 - **Garage** — tap a block in the palette, tap a bay to place it. Tap a bay that already holds that block to remove it. The top row is the front of the hull. The gold 3×3 is the turret; those bays are module slots too. A hull switcher lists the chassis you own, and each hull keeps its own layout.
-- **Battle** — a 1v1 against another built tank. The rival is a bot today. It uses the same module grid and the same drive commands a remote player would send later.
+- **Battle** — pick Rookie, Veteran, or Warlord, then duel. Beating a rival opens the next one. Each bot uses the same drive commands a remote player would send later.
 - **Shop** — spend scrap from won duels. Each card shows the name, what the part does, its tradeoff, the price, and a Buy button. Bought blocks join the garage palette. The bought hull joins the switcher.
 
 ## Controls
@@ -23,7 +23,7 @@ Left stick (or WASD / arrows):
 - Left and right turn the hull
 - Diagonals do both
 
-Right stick rotates the 3×3 turret toward that direction and fires every powered gun while you hold it off-center. Turret guns shoot along the aim. Hull guns stay fixed to the hull and shoot the way the hull faces. Mouse aim and click (or space) do the same thing. Escape or Menu leaves the arena. A win pays 50 scrap and offers a rematch or a return to the garage.
+Right stick rotates the 3×3 turret toward that direction and fires every powered gun while you hold it off-center. Turret guns shoot along the aim. Hull guns stay fixed to the hull and shoot the way the hull faces. Mouse aim and click (or space) do the same thing. Escape or Menu leaves the arena. A win pays 50 scrap for Rookie, 80 for Veteran, and 120 for Warlord, then offers a rematch, the rival list, or the garage. Phones do not double-tap or pinch to zoom.
 
 ## Modules
 
@@ -44,11 +44,13 @@ Starter blocks, added on top of a bare core (70 core, 28 speed, 18 turning, 36 f
 
 The default hull is 5 blocks wide and 7 long, with the front row at the top. The long axis is forward: that is the way the hull drives and the way hull cannons fire. A centered 3×3 turret carries two of the four cannons; the other two sit on the front of the hull. The rear-turret hull keeps the same footprint and moves the gold 3×3 to rows 5–7. The rest of the starter loadout is eight armor, four tracks, two engines, four fuel, and two power cells. Fire rate is the average of the guns still mounted, scaled by power. It drops when weapon demand is higher than supply, and hits zero with no power. An empty fuel tank crawls at a quarter speed. A repair bay spends power only while a block is hurt or missing.
 
-Hitting either cell of a medium cannon damages that one gun. It pops off as a single part and frees both bays. Heavy armor is slower. The bot sometimes fields one of these parts, and sometimes the rear hull, on an otherwise ordinary loadout.
+Hitting either cell of a medium cannon damages that one gun. It pops off as a single part and frees both bays. Heavy armor is slower. Module blocks are square; barrels, engines, and rivets keep their own shapes.
 
-Saves use `tank-builder-save-v4`, with one layout per hull. An older long-hull save keeps its scrap, unlocks, and 5×7 layout on the standard hull. A wide or 5×3 save keeps scrap and unlocks and gets a fresh standard hull.
+Rookie fields two cannons and a light hull, and aims loosely. Veteran adds a heavy plate, four cannons, and a repair bay, and starts to strafe and lead. Warlord rides the rear-turret hull with heavy cheeks, a medium cannon, and a repair bay, and leads, dodges, and holds range. Progress is `botsBeaten` in the save: 0 opens only Rookie, and each win unlocks the next name.
 
-New block types are another entry in `src/modules.ts`. Shop stock is the `SHOP_ITEMS` list. A rival is `createRivalLoadout()` plus a `TankController` in `src/control.ts`.
+Saves use `tank-builder-save-v4`, with one layout per hull. An older long-hull save keeps its scrap, unlocks, and 5×7 layout on the standard hull. A wide or 5×3 save keeps scrap and unlocks and gets a fresh standard hull. A save that has no rival progress starts at Rookie.
+
+New block types are another entry in `src/modules.ts`. Shop stock is the `SHOP_ITEMS` list. Rivals live in `src/bots.ts`. A `TankController` in `src/control.ts` turns a tuning block into drive commands.
 
 ## Hosting
 

@@ -11,6 +11,7 @@ function blank(currency = 0, unlocked: string[] = []): SaveData {
     unlocked,
     hull: "standard",
     layouts: { standard: createDefaultGrid("standard") },
+    botsBeaten: 0,
   };
 }
 
@@ -56,6 +57,13 @@ interface RawSave {
   hull?: unknown;
   layouts?: unknown;
   grid?: unknown;
+  botsBeaten?: unknown;
+}
+
+function readBots(raw: { botsBeaten?: unknown } | null): number {
+  const value = raw && typeof raw.botsBeaten === "number" ? Math.floor(raw.botsBeaten) : 0;
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(3, value));
 }
 
 function layoutFrom(value: unknown): (string | null)[][] | null {
@@ -83,7 +91,7 @@ function sanitize(raw: RawSave | null): SaveData {
   for (const id of unlocked) {
     if (getHull(id) && !layouts[id]) layouts[id] = createDefaultGrid(id);
   }
-  return { version: 1, currency, unlocked, hull, layouts };
+  return { version: 1, currency, unlocked, hull, layouts, botsBeaten: readBots(raw) };
 }
 
 export function activeLayout(save: SaveData): (string | null)[][] {
@@ -112,6 +120,7 @@ export function loadSave(): SaveData {
       const kept = layoutFrom(parsed.grid);
       migrated.hull = "standard";
       migrated.layouts = { standard: kept ?? createDefaultGrid("standard") };
+      migrated.botsBeaten = readBots(parsed);
       for (const stale of OLD_KEYS) localStorage.removeItem(stale);
       saveGame(migrated);
       return migrated;
@@ -137,6 +146,7 @@ export function saveGame(data: SaveData): void {
     unlocked: [...data.unlocked],
     hull,
     layouts,
+    botsBeaten: Math.max(0, Math.min(3, Math.floor(data.botsBeaten) || 0)),
   };
   data.hull = hull;
   data.layouts = layouts;
