@@ -1,14 +1,26 @@
+import { createRivalController, type ShotView, type TankCommands } from "./control";
 import { el } from "./dom";
+import { CELL, cellCenter, listGuns } from "./geometry";
 import { attachInput, type InputController } from "./input";
-import { clamp, rotateToward, traceRoundRect } from "./math";
-import { createDefaultGrid, getModule } from "./modules";
+import { clamp, localToWorld, rotateToward, traceRoundRect, worldToLocal } from "./math";
+import {
+  blockPlate,
+  cloneGrid,
+  createDefaultGrid,
+  createRivalGrid,
+  getModule,
+  isTurretCell,
+  turretOrigin,
+  TURRET_SIZE,
+} from "./modules";
 import { sfxBoom, sfxHit, sfxShot } from "./sfx";
-import { computeStats, fuelDrainPerSecond, maxDriveSpeed, maxTurnRate, mountedWeapons } from "./stats";
+import { computeStats, fuelDrainPerSecond, maxDriveSpeed, maxTurnRate } from "./stats";
 import type { ModuleKind } from "./types";
 
 const ARENA_W = 2000;
 const ARENA_H = 1400;
-const CELL = 28;
+const WIN_SCRAP = 50;
+const TURRET_TURN = 4.6;
 
 interface Pillar {
   x: number;
@@ -18,46 +30,30 @@ interface Pillar {
 }
 
 const PILLARS: readonly Pillar[] = [
-  { x: 220, y: 160, w: 130, h: 90 },
-  { x: 1640, y: 180, w: 140, h: 90 },
-  { x: 200, y: 1100, w: 150, h: 90 },
-  { x: 1620, y: 1080, w: 150, h: 100 },
-  { x: 880, y: 150, w: 180, h: 70 },
-  { x: 900, y: 1160, w: 170, h: 70 },
-  { x: 160, y: 560, w: 80, h: 200 },
-  { x: 1760, y: 540, w: 80, h: 200 },
+  { x: 180, y: 600, w: 120, h: 180 },
+  { x: 1700, y: 600, w: 120, h: 180 },
 ];
 
+type Side = "player" | "rival";
+
 interface Tank {
+  id: Side;
+  name: string;
   x: number;
   y: number;
-  /** 0 faces up the screen. Positive rotation is clockwise. */
   angle: number;
   turret: number;
   vx: number;
   vy: number;
-  hp: number;
+  core: number;
+  coreMax: number;
   fuel: number;
-  iframe: number;
+  cooldown: number;
   flash: number;
-}
-
-interface Target {
-  kind: "enemy" | "crate";
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  size: number;
-  hp: number;
-  hpMax: number;
-  alive: boolean;
-  respawn: number;
-  shoot: number;
-  touch: number;
-  flash: number;
-  wander: number;
-  scrap: number;
+  grid: (string | null)[][];
+  plate: number[][];
+  blueprint: (string | null)[][];
+  radius: number;
 }
 
 interface Shot {
@@ -68,7 +64,7 @@ interface Shot {
   r: number;
   damage: number;
   life: number;
-  friendly: boolean;
+  owner: Side;
   color: string;
 }
 
@@ -95,22 +91,21 @@ export interface BattleOptions {
   currency: number;
   onCurrency: (next: number) => void;
   onExit: () => void;
+  onGarage: () => void;
 }
 
-export interface TankDebug {
+interface TankDebug {
   x: number;
   y: number;
   angle: number;
   turret: number;
-  hp: number;
+  core: number;
   fuel: number;
   shots: number;
-  enemies: number;
-  crates: number;
-  bank: number;
-  earned: number;
-  phase: "play" | "dead";
-  targets: { x: number; y: number; kind: "enemy" | "crate"; alive: boolean; hp: number }[];
+  phase: "play" | "win" | "lose";
+  guns: Array<"hull" | "turret">;
+  rivalCore: number;
+  rivalTurret: number;
 }
 
 declare global {
@@ -120,40 +115,37 @@ declare global {
 }
 
 /**
- * Angle convention for the whole battle: 0 points up the screen, clockwise is positive.
- * Move stick up/down scales velocity along the hull facing. Left/right adds to hull angle.
- * Aim stick sets a world direction (screen up is 0) and fires while it is held out.
+ * Angle 0 faces up the screen. Positive rotation is clockwise.
+ * Move stick up/down drives along the hull. Left/right turns the hull.
+ * The centered 3×3 rotates toward the aim stick. Every powered gun fires while aim is held:
+ * turret guns along the aim, hull guns along the hull.
  */
 export function mountBattle(root: HTMLElement, options: BattleOptions): () => void {
-  const grid = options.grid.length > 0 && options.grid[0]?.length ? options.grid : createDefaultGrid();
-  const stats = computeStats(grid);
-  const weapons = mountedWeapons(grid);
-  const cols = grid[0].length;
-  const rows = grid.length;
-  const bodyW = cols * CELL;
-  const bodyH = rows * CELL;
-  const radius = Math.max(bodyW, bodyH) * 0.42;
-  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
+  const playerBlueprint = options.grid.length >= 3 ? options.grid : createDefaultGrid();
   const canvas = el("canvas");
   canvas.id = "battle-canvas";
-  canvas.setAttribute("aria-label", "Battle arena");
+  canvas.setAttribute("aria-label", "Duel arena");
 
   const hud = el("div", "hud");
   const exit = el("button", "btn btn-ghost hud-exit", "Menu");
   exit.type = "button";
   const readout = el("div", "hud-readout");
-  const hpLabel = el("div", "meter-label");
-  hpLabel.append(el("span", undefined, "Hull"), el("span", "meter-value", ""));
-  const hpMeter = el("div", "meter meter-hp");
-  const hpFill = el("span");
-  hpMeter.append(hpFill);
+  const coreLabel = el("div", "meter-label");
+  coreLabel.append(el("span", undefined, "Core"), el("span", "meter-value", ""));
+  const coreMeter = el("div", "meter meter-hp");
+  const coreFill = el("span");
+  coreMeter.append(coreFill);
   const fuelLabel = el("div", "meter-label");
   fuelLabel.append(el("span", undefined, "Fuel"), el("span", "meter-value", ""));
   const fuelMeter = el("div", "meter meter-fuel");
   const fuelFill = el("span");
   fuelMeter.append(fuelFill);
-  readout.append(hpLabel, hpMeter, fuelLabel, fuelMeter);
+  const rivalLabel = el("div", "meter-label");
+  rivalLabel.append(el("span", undefined, "Rival"), el("span", "meter-value", ""));
+  const rivalMeter = el("div", "meter meter-rival");
+  const rivalFill = el("span");
+  rivalMeter.append(rivalFill);
+  readout.append(coreLabel, coreMeter, fuelLabel, fuelMeter, rivalLabel, rivalMeter);
   const scrap = el("div", "scrap-pill hud-scrap");
   const scrapValue = el("span", undefined, "");
   scrap.append(el("span", "scrap-nut", "⬡"), scrapValue);
@@ -162,24 +154,24 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   const help = el(
     "p",
     "battle-help",
-    "Move stick: up/down drives, left/right turns. Aim stick fires while held. WASD + mouse too.",
+    "Up/down drives, left/right turns. Aim stick spins the turret and fires every gun.",
   );
   const status = el("p", "battle-status");
   status.setAttribute("aria-live", "polite");
 
   const moveStick = joystick("move", "Move", "Move. Up and down drive. Left and right turn.");
-  const aimStick = joystick("aim", "Aim", "Aim. Hold a direction to turn the turret and fire.");
+  const aimStick = joystick("aim", "Aim", "Aim. Spins the turret and fires while held.");
 
   const endcard = el("div", "endcard");
   endcard.hidden = true;
-  const endTitle = el("h2", undefined, "Hull breached");
+  const endTitle = el("h2", undefined, "");
   const endCopy = el("p", "end-copy");
-  const endActions = el("div", "end-actions");
-  const retry = el("button", "btn btn-primary", "Retry");
+  const retry = el("button", "btn btn-primary", "Rematch");
   retry.type = "button";
-  const endMenu = el("button", "btn", "Menu");
-  endMenu.type = "button";
-  endActions.append(retry, endMenu);
+  const garage = el("button", "btn", "Garage");
+  garage.type = "button";
+  const endActions = el("div", "end-actions");
+  endActions.append(retry, garage);
   const endPanel = el("div", "end-panel");
   endPanel.append(endTitle, endCopy, endActions);
   endcard.append(endPanel);
@@ -189,427 +181,209 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas unavailable");
   const context = ctx;
-
-  const input: InputController = attachInput(moveStick.base, moveStick.knob, aimStick.base, aimStick.knob);
+  const input = attachInput(moveStick.base, moveStick.knob, aimStick.base, aimStick.knob);
+  const rivalAi = createRivalController();
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   let bank = options.currency;
-  let earned = 0;
-  let phase: "play" | "dead" = "play";
-  let cooldown = 0;
-  let warmup = 6;
+  let paid = false;
+  let phase: "play" | "win" | "lose" = "play";
   let shake = 0;
   let lastStatus = "";
   let raf = 0;
   let lastTime = 0;
   let stopped = false;
   let acc = 0;
-
-  let tank: Tank = makeTank();
-  let targets: Target[] = [];
+  let player = spawnTank("player", "You", playerBlueprint, 960, 1040, 0);
+  let rival = spawnTank("rival", "Rival", createRivalGrid(), 1040, 400, Math.PI);
   let shots: Shot[] = [];
   let particles: Particle[] = [];
   let floaters: Floater[] = [];
 
-  function makeTank(): Tank {
-    return {
-      x: ARENA_W / 2,
-      y: ARENA_H / 2,
-      angle: 0,
-      turret: 0,
-      vx: 0,
-      vy: 0,
-      hp: stats.hp,
-      fuel: stats.fuel,
-      iframe: 0,
-      flash: 0,
-    };
-  }
-
   function boot(): void {
-    tank = makeTank();
+    player = spawnTank("player", "You", playerBlueprint, 960, 1040, 0);
+    rival = spawnTank("rival", "Rival", createRivalGrid(), 1040, 400, Math.PI);
     shots = [];
     particles = [];
     floaters = [];
-    targets = [];
-    const rand = mulberry32(0x5eed);
-    for (let i = 0; i < 6; i += 1) targets.push(makeTarget("crate", rand));
-    for (let i = 0; i < 3; i += 1) targets.push(makeTarget("enemy", rand));
-    cooldown = 0;
-    warmup = 6;
-    earned = 0;
-    phase = "play";
     shake = 0;
+    phase = "play";
+    paid = false;
     endcard.hidden = true;
     syncHud();
   }
 
-  function makeTarget(kind: Target["kind"], rand: () => number): Target {
-    const spot = openPoint(rand, 280);
-    const enemy = kind === "enemy";
-    const hp = enemy ? 48 : 20;
-    return {
-      kind,
-      x: spot.x,
-      y: spot.y,
-      vx: 0,
-      vy: 0,
-      size: enemy ? 48 : 42,
-      hp,
-      hpMax: hp,
-      alive: true,
-      respawn: 0,
-      shoot: 2.6 + rand() * 2,
-      touch: 0,
-      flash: 0,
-      wander: rand() * 1.5,
-      scrap: enemy ? 20 : 8,
-    };
-  }
-
-  function openPoint(rand: () => number, minFromPlayer: number): { x: number; y: number } {
-    for (let i = 0; i < 60; i += 1) {
-      const x = 90 + rand() * (ARENA_W - 180);
-      const y = 90 + rand() * (ARENA_H - 180);
-      if (Math.hypot(x - tank.x, y - tank.y) < minFromPlayer) continue;
-      if (PILLARS.some((pillar) => circleHitsRect(x, y, 40, pillar))) continue;
-      if (targets.some((target) => target.alive && Math.hypot(target.x - x, target.y - y) < 90)) continue;
-      return { x, y };
-    }
-    return { x: 160, y: 160 };
-  }
-
-  function award(amount: number, x: number, y: number): void {
-    bank += amount;
-    earned += amount;
-    options.onCurrency(bank);
-    floaters.push({ x, y: y - 20, text: `+${amount}`, life: 0.9 });
-    if (floaters.length > 24) floaters.splice(0, floaters.length - 24);
-  }
-
-  function burst(x: number, y: number, color: string, count: number): void {
-    for (let i = 0; i < count; i += 1) {
-      const angle = Math.random() * Math.PI * 2;
-      const speed = 40 + Math.random() * 160;
-      particles.push({
-        x,
-        y,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed,
-        life: 0.35 + Math.random() * 0.35,
-        max: 0.7,
-        color,
-        size: 4 + Math.random() * 6,
-      });
-    }
-    if (particles.length > 120) particles.splice(0, particles.length - 120);
-  }
-
-  function hurtPlayer(amount: number): void {
-    if (phase !== "play" || tank.iframe > 0) return;
-    tank.hp = Math.max(0, tank.hp - amount);
-    tank.iframe = 0.55;
-    tank.flash = 0.12;
-    sfxHit();
-    if (!reduceMotion) shake = Math.min(12, shake + 5);
-    if (tank.hp <= 0) {
-      phase = "dead";
-      sfxBoom();
-      burst(tank.x, tank.y, "#e7edf5", 22);
-      endCopy.textContent = earned > 0 ? `You hauled ${earned} scrap.` : "No scrap this run.";
-      endcard.hidden = false;
-    }
-  }
-
   function update(dt: number): void {
-    if (warmup > 0) warmup = Math.max(0, warmup - dt);
-    const drive = input.getDrive();
-    const throttle = Math.max(Math.abs(drive.forward), Math.abs(drive.turn) * 0.5);
-    if (tank.fuel > 0 && throttle > 0.02) {
-      tank.fuel = Math.max(0, tank.fuel - fuelDrainPerSecond(stats, throttle) * dt);
-    }
-    const signed = drive.forward < 0 ? drive.forward * 0.8 : drive.forward;
-    const speed = maxDriveSpeed(stats, tank.fuel);
-    const targetVx = Math.sin(tank.angle) * speed * signed;
-    const targetVy = -Math.cos(tank.angle) * speed * signed;
-    const blend = 1 - Math.exp(-7 * dt);
-    tank.vx += (targetVx - tank.vx) * blend;
-    tank.vy += (targetVy - tank.vy) * blend;
-    tank.x += tank.vx * dt;
-    tank.y += tank.vy * dt;
-    tank.angle += drive.turn * maxTurnRate(stats) * dt;
-    const solved = resolveCircle(tank.x, tank.y, radius);
-    tank.x = solved.x;
-    tank.y = solved.y;
-    tank.iframe = Math.max(0, tank.iframe - dt);
-    tank.flash = Math.max(0, tank.flash - dt);
-
-    if (Math.abs(drive.forward) > 0.3 && Math.random() < dt * 20) {
-      const bx = -Math.sin(tank.angle);
-      const by = Math.cos(tank.angle);
-      particles.push({
-        x: tank.x + bx * radius * 0.85,
-        y: tank.y + by * radius * 0.7,
-        vx: bx * 20 + (Math.random() - 0.5) * 30,
-        vy: by * 20 + (Math.random() - 0.5) * 30,
-        life: 0.35,
-        max: 0.35,
-        color: "rgba(180, 186, 196, 0.7)",
-        size: 5,
-      });
-    }
-
-    const aim = input.getAimStick();
-    let targetAngle = tank.turret;
-    let firing = false;
-    if (aim.active) {
-      targetAngle = aim.angle;
-      firing = true;
-    } else {
-      const mouse = input.getMouseClient();
-      if (mouse.valid) {
-        const world = clientToWorld(mouse.x, mouse.y);
-        targetAngle = Math.atan2(world.x - tank.x, -(world.y - tank.y));
-      }
-      firing = input.isFiringFromPointer();
-    }
-    tank.turret = rotateToward(tank.turret, targetAngle, 5.4 * dt);
-
-    if (cooldown > 0) cooldown -= dt;
-    if (firing && cooldown <= 0 && stats.fireRate > 0 && weapons.length > 0) {
-      fireSalvo();
-      cooldown = 1 / stats.fireRate;
-    }
-
-    for (const target of targets) {
-      target.flash = Math.max(0, target.flash - dt);
-      target.touch = Math.max(0, target.touch - dt);
-      if (!target.alive) {
-        target.respawn -= dt;
-        if (target.respawn <= 0) revive(target);
-        continue;
-      }
-      if (target.kind === "enemy") updateEnemy(target, dt);
-      const dist = Math.hypot(target.x - tank.x, target.y - tank.y);
-      if (warmup <= 0 && target.kind === "enemy" && dist < radius + target.size * 0.45 && target.touch <= 0) {
-        target.touch = 0.85;
-        const nx = (tank.x - target.x) / (dist || 1);
-        const ny = (tank.y - target.y) / (dist || 1);
-        tank.x += nx * 14;
-        tank.y += ny * 14;
-        const bumped = resolveCircle(tank.x, tank.y, radius);
-        tank.x = bumped.x;
-        tank.y = bumped.y;
-        hurtPlayer(12);
-      }
-    }
-    separateTargets();
+    const playerCmd = commandsFromPlayer(input, player);
+    const rivalCmd = rivalAi.commands({
+      self: rival,
+      foe: player,
+      arena: { w: ARENA_W, h: ARENA_H },
+      incoming: shots.filter((shot) => shot.owner !== "rival").map(shotView),
+      dt,
+    });
+    stepTank(player, playerCmd, dt);
+    stepTank(rival, rivalCmd, dt);
+    separateTanks();
 
     for (let i = shots.length - 1; i >= 0; i -= 1) {
       const shot = shots[i];
       shot.x += shot.vx * dt;
       shot.y += shot.vy * dt;
       shot.life -= dt;
-      const inside =
-        shot.x < 0 || shot.y < 0 || shot.x > ARENA_W || shot.y > ARENA_H || shotHitsPillar(shot);
-      if (shot.life <= 0 || inside) {
+      if (shot.life <= 0 || shot.x < 0 || shot.y < 0 || shot.x > ARENA_W || shot.y > ARENA_H || shotHitsPillar(shot)) {
         shots.splice(i, 1);
         continue;
       }
-      if (shot.friendly) {
-        const hit = targets.find(
-          (target) => target.alive && Math.hypot(target.x - shot.x, target.y - shot.y) < target.size * 0.5 + shot.r,
-        );
-        if (!hit) continue;
-        hit.hp -= shot.damage;
-        hit.flash = 0.08;
+      const target = shot.owner === "player" ? rival : player;
+      if (strike(target, shot)) {
         shots.splice(i, 1);
-        if (hit.hp <= 0) destroyTarget(hit);
-        else sfxHit();
-      } else if (Math.hypot(tank.x - shot.x, tank.y - shot.y) < radius * 0.72 + shot.r) {
-        shots.splice(i, 1);
-        hurtPlayer(shot.damage);
+        if (defeated(target)) finish(target.id === "player" ? "lose" : "win");
       }
     }
-
     stepDecor(dt);
     if (shake > 0) shake = Math.max(0, shake - dt * 18);
     syncHud();
   }
 
-  function updateEnemy(target: Target, dt: number): void {
-    target.wander -= dt;
-    if (target.wander <= 0) {
-      target.wander = 1.1 + Math.random() * 1.8;
-      const angle = Math.random() * Math.PI * 2;
-      const speed = 32 + Math.random() * 26;
-      const dx = tank.x - target.x;
-      const dy = tank.y - target.y;
-      const dist = Math.hypot(dx, dy) || 1;
-      target.vx = Math.cos(angle) * speed + (dx / dist) * 10;
-      target.vy = Math.sin(angle) * speed + (dy / dist) * 10;
+  function stepTank(tank: Tank, cmd: TankCommands, dt: number): void {
+    const stats = computeStats(tank.grid);
+    if (tank.fuel > stats.fuel) tank.fuel = stats.fuel;
+    const throttle = Math.max(Math.abs(cmd.forward), Math.abs(cmd.turn) * 0.5);
+    if (tank.fuel > 0 && throttle > 0.02) {
+      tank.fuel = Math.max(0, tank.fuel - fuelDrainPerSecond(stats, throttle) * dt);
     }
-    target.x += target.vx * dt;
-    target.y += target.vy * dt;
-    const solved = resolveCircle(target.x, target.y, target.size * 0.5);
-    if (Math.abs(solved.x - target.x) > 0.4 || Math.abs(solved.y - target.y) > 0.4) {
-      target.vx = 0;
-      target.vy = 0;
-      target.wander = 0;
-    }
-    target.x = solved.x;
-    target.y = solved.y;
-
-    const dist = Math.hypot(tank.x - target.x, tank.y - target.y);
-    if (warmup <= 0 && dist < 420) {
-      target.shoot -= dt;
-      if (target.shoot <= 0) {
-        target.shoot = 2.6 + Math.random() * 1.8;
-        const angle = Math.atan2(tank.x - target.x, -(tank.y - target.y));
-        const speed = 145;
-        shots.push({
-          x: target.x + Math.sin(angle) * 28,
-          y: target.y - Math.cos(angle) * 28,
-          vx: Math.sin(angle) * speed,
-          vy: -Math.cos(angle) * speed,
-          r: 6,
-          damage: 8,
-          life: 2.6,
-          friendly: false,
-          color: "#ffb703",
-        });
-      }
+    const signed = cmd.forward < 0 ? cmd.forward * 0.8 : cmd.forward;
+    const speed = maxDriveSpeed(stats, tank.fuel);
+    const wishX = Math.sin(tank.angle) * speed * signed;
+    const wishY = -Math.cos(tank.angle) * speed * signed;
+    const blend = 1 - Math.exp(-7 * dt);
+    tank.vx += (wishX - tank.vx) * blend;
+    tank.vy += (wishY - tank.vy) * blend;
+    tank.x += tank.vx * dt;
+    tank.y += tank.vy * dt;
+    tank.angle += cmd.turn * maxTurnRate(stats) * dt;
+    const solved = resolveCircle(tank.x, tank.y, tank.radius);
+    tank.x = solved.x;
+    tank.y = solved.y;
+    if (cmd.aimAngle !== null) tank.turret = rotateToward(tank.turret, cmd.aimAngle, TURRET_TURN * dt);
+    tank.flash = Math.max(0, tank.flash - dt);
+    if (tank.cooldown > 0) tank.cooldown -= dt;
+    if (cmd.fire && tank.cooldown <= 0 && stats.fireRate > 0) {
+      fireGuns(tank);
+      tank.cooldown = 1 / stats.fireRate;
     }
   }
 
-  function separateTargets(): void {
-    for (let i = 0; i < targets.length; i += 1) {
-      for (let j = i + 1; j < targets.length; j += 1) {
-        const a = targets[i];
-        const b = targets[j];
-        if (!a.alive || !b.alive) continue;
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const min = (a.size + b.size) * 0.48;
-        const dist = Math.hypot(dx, dy);
-        if (dist <= 0 || dist >= min) continue;
-        const push = (min - dist) / 2;
-        const nx = dx / dist;
-        const ny = dy / dist;
-        a.x -= nx * push;
-        a.y -= ny * push;
-        b.x += nx * push;
-        b.y += ny * push;
-      }
-    }
-  }
-
-  function destroyTarget(target: Target): void {
-    target.alive = false;
-    target.respawn = target.kind === "enemy" ? 2.6 : 3.4;
-    award(target.scrap, target.x, target.y);
-    burst(target.x, target.y, target.kind === "enemy" ? "#ff6b6b" : "#e0a15a", 14);
-    sfxBoom();
-    if (!reduceMotion) shake = Math.min(10, shake + 3);
-  }
-
-  function revive(target: Target): void {
-    const spot = openPoint(Math.random, 320);
-    target.x = spot.x;
-    target.y = spot.y;
-    target.vx = 0;
-    target.vy = 0;
-    target.hp = target.hpMax;
-    target.alive = true;
-    target.wander = 0.3;
-    target.shoot = 1;
-  }
-
-  function fireSalvo(): void {
-    const count = weapons.length;
-    const spread = count <= 1 ? 0 : Math.min(0.1, 0.38 / count);
-    for (let i = 0; i < count; i += 1) {
-      const offset = count === 1 ? 0 : (i - (count - 1) / 2) * spread;
-      const angle = tank.turret + offset;
-      const muzzle = 34 + radius * 0.15;
-      const speed = 560;
+  function fireGuns(tank: Tank): void {
+    const guns = listGuns(tank.grid);
+    for (const gun of guns) {
+      const angle = gun.mount === "turret" ? tank.turret : tank.angle;
+      const muzzle = localToWorld(gun.lx, gun.ly - CELL * 0.55, angle);
+      const speed = 540;
       shots.push({
-        x: tank.x + Math.sin(angle) * muzzle,
-        y: tank.y - Math.cos(angle) * muzzle,
+        x: tank.x + muzzle.x,
+        y: tank.y + muzzle.y,
         vx: Math.sin(angle) * speed,
         vy: -Math.cos(angle) * speed,
-        r: 5,
-        damage: weapons[i].damage,
-        life: 1.15,
-        friendly: true,
-        color: "#8ef6ea",
+        r: 4.5,
+        damage: gun.damage,
+        life: 1.25,
+        owner: tank.id,
+        color: tank.id === "player" ? "#8ef6ea" : "#ffb0a0",
       });
     }
-    if (shots.length > 64) shots.splice(0, shots.length - 64);
-    tank.flash = 0.07;
-    sfxShot();
+    if (shots.length > 80) shots.splice(0, shots.length - 80);
+    tank.flash = 0.06;
+    if (tank.id === "player") sfxShot();
   }
 
-  function stepDecor(dt: number): void {
-    for (let i = particles.length - 1; i >= 0; i -= 1) {
-      const bit = particles[i];
-      bit.life -= dt;
-      bit.x += bit.vx * dt;
-      bit.y += bit.vy * dt;
-      bit.vx *= 0.96;
-      bit.vy *= 0.96;
-      if (bit.life <= 0) particles.splice(i, 1);
+  function strike(tank: Tank, shot: Shot): boolean {
+    const rows = tank.grid.length;
+    const cols = tank.grid[0]?.length ?? 0;
+    let best: { r: number; c: number; d: number } | null = null;
+    for (let r = 0; r < rows; r += 1) {
+      for (let c = 0; c < cols; c += 1) {
+        if (!tank.grid[r][c]) continue;
+        const angle = isTurretCell(r, c, cols, rows) ? tank.turret : tank.angle;
+        const local = worldToLocal(shot.x - tank.x, shot.y - tank.y, angle);
+        const center = cellCenter(c, r, cols, rows);
+        const half = CELL * 0.46 + shot.r;
+        if (Math.abs(local.x - center.x) > half || Math.abs(local.y - center.y) > half) continue;
+        const dist = Math.hypot(local.x - center.x, local.y - center.y);
+        if (!best || dist < best.d) best = { r, c, d: dist };
+      }
     }
-    for (let i = floaters.length - 1; i >= 0; i -= 1) {
-      const floater = floaters[i];
-      floater.life -= dt;
-      floater.y -= 28 * dt;
-      if (floater.life <= 0) floaters.splice(i, 1);
+    if (best) {
+      hurtCell(tank, best.r, best.c, shot.damage);
+      sfxHit();
+      return true;
+    }
+    if (insideFootprint(tank, shot.x, shot.y)) {
+      tank.core -= shot.damage;
+      tank.flash = 0.12;
+      sfxHit();
+      if (!reduceMotion) shake = Math.min(8, shake + (tank.id === "player" ? 3 : 1));
+      return true;
+    }
+    return false;
+  }
+
+  function hurtCell(tank: Tank, row: number, col: number, amount: number): void {
+    const id = tank.grid[row][col];
+    if (!id) {
+      tank.core -= amount;
+      return;
+    }
+    tank.plate[row][col] -= amount;
+    tank.flash = 0.08;
+    if (tank.plate[row][col] > 0) return;
+    const overflow = -tank.plate[row][col];
+    const mod = getModule(id);
+    tank.grid[row][col] = null;
+    tank.plate[row][col] = 0;
+    if (overflow > 0) tank.core -= overflow;
+    const center = cellCenter(col, row, tank.grid[0].length, tank.grid.length);
+    const angle = isTurretCell(row, col, tank.grid[0].length, tank.grid.length) ? tank.turret : tank.angle;
+    const world = localToWorld(center.x, center.y, angle);
+    burst(tank.x + world.x, tank.y + world.y, mod?.color ?? "#f6f1e6", 8);
+    floaters.push({ x: tank.x + world.x, y: tank.y + world.y, text: mod ? `${mod.name} lost` : "Lost", life: 0.8 });
+    if (tank.id === "player") {
+      sfxBoom();
+      if (!reduceMotion) shake = Math.min(10, shake + 4);
     }
   }
 
-  function syncHud(): void {
-    const hpPct = stats.hp > 0 ? Math.max(0, tank.hp) / stats.hp : 0;
-    hpFill.style.width = `${hpPct * 100}%`;
-    fuelFill.style.width = `${stats.fuel > 0 ? (tank.fuel / stats.fuel) * 100 : 0}%`;
-    const hpText = hpLabel.querySelector(".meter-value");
-    const fuelText = fuelLabel.querySelector(".meter-value");
-    if (hpText) hpText.textContent = String(Math.ceil(tank.hp));
-    if (fuelText) fuelText.textContent = String(Math.ceil(tank.fuel));
-    hpMeter.classList.toggle("low", hpPct < 0.3);
-    scrapValue.textContent = `${bank.toLocaleString()} scrap`;
-    const next = statusLine();
-    if (next !== lastStatus) {
-      lastStatus = next;
-      status.textContent = next;
-      status.hidden = next.length === 0;
+  function finish(result: "win" | "lose"): void {
+    if (phase !== "play") return;
+    phase = result;
+    if (result === "win" && !paid) {
+      paid = true;
+      bank += WIN_SCRAP;
+      options.onCurrency(bank);
     }
-  }
-
-  function statusLine(): string {
-    if (phase === "dead") return "";
-    if (tank.fuel <= 0) return "Fuel empty — crawling";
-    if (stats.weaponCount === 0) return "No cannon mounted";
-    if (stats.fireRate <= 0) return "Cannons unpowered";
-    return "";
+    endTitle.textContent = result === "win" ? "You won" : "Hull breached";
+    endCopy.textContent = result === "win" ? `${WIN_SCRAP} scrap banked.` : "The rival kept the field.";
+    endcard.hidden = false;
+    sfxBoom();
   }
 
   function draw(): void {
     const view = currentView();
     context.setTransform(1, 0, 0, 1, 0, 0);
     context.clearRect(0, 0, canvas.width, canvas.height);
-    const shakeX = shake > 0 && !reduceMotion ? (Math.random() - 0.5) * shake : 0;
-    const shakeY = shake > 0 && !reduceMotion ? (Math.random() - 0.5) * shake : 0;
+    const jx = shake > 0 && !reduceMotion ? (Math.random() - 0.5) * shake : 0;
+    const jy = shake > 0 && !reduceMotion ? (Math.random() - 0.5) * shake : 0;
     context.setTransform(
       view.dpr * view.zoom,
       0,
       0,
       view.dpr * view.zoom,
-      (-view.camX + shakeX) * view.dpr * view.zoom,
-      (-view.camY + shakeY) * view.dpr * view.zoom,
+      (-view.camX + jx) * view.dpr * view.zoom,
+      (-view.camY + jy) * view.dpr * view.zoom,
     );
-
     context.fillStyle = "#10141c";
-    context.fillRect(-600, -600, ARENA_W + 1200, ARENA_H + 1200);
+    context.fillRect(-400, -400, ARENA_W + 800, ARENA_H + 800);
     context.fillStyle = "#1b2333";
     context.fillRect(0, 0, ARENA_W, ARENA_H);
     context.strokeStyle = "rgba(255,255,255,0.045)";
@@ -626,30 +400,35 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       context.lineTo(ARENA_W, y);
       context.stroke();
     }
-
     context.strokeStyle = "#465064";
     context.lineWidth = 16;
     context.strokeRect(8, 8, ARENA_W - 16, ARENA_H - 16);
-    context.save();
-    context.strokeStyle = "#ffb703";
-    context.lineWidth = 4;
-    context.setLineDash([18, 14]);
-    context.strokeRect(20, 20, ARENA_W - 40, ARENA_H - 40);
-    context.restore();
-
-    for (const pillar of PILLARS) drawPillar(pillar);
-    for (const target of targets) {
-      if (target.alive) drawTarget(target);
+    for (const pillar of PILLARS) {
+      traceRoundRect(context, pillar.x, pillar.y, pillar.w, pillar.h, 8);
+      context.fillStyle = "#2c3546";
+      context.fill();
+      context.strokeStyle = "#0e1116";
+      context.lineWidth = 4;
+      context.stroke();
     }
-    for (const shot of shots) drawShot(shot);
+    drawTank(rival, "#5a2430");
+    drawTank(player, "#2a3142");
+    for (const shot of shots) {
+      context.save();
+      context.translate(shot.x, shot.y);
+      context.rotate(Math.atan2(shot.vy, shot.vx));
+      context.fillStyle = shot.color;
+      traceRoundRect(context, -12, -3, 16, 6, 3);
+      context.fill();
+      context.restore();
+    }
     for (const bit of particles) {
       context.globalAlpha = Math.max(0, bit.life / bit.max);
       context.fillStyle = bit.color;
       context.fillRect(bit.x, bit.y, bit.size, bit.size);
       context.globalAlpha = 1;
     }
-    drawTank();
-    context.font = "700 18px Trebuchet MS, Verdana, sans-serif";
+    context.font = "700 16px Trebuchet MS, Verdana, sans-serif";
     context.textAlign = "center";
     for (const floater of floaters) {
       context.globalAlpha = Math.max(0, floater.life);
@@ -659,133 +438,96 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     }
   }
 
-  function drawPillar(pillar: Pillar): void {
-    traceRoundRect(context, pillar.x, pillar.y, pillar.w, pillar.h, 8);
-    context.fillStyle = "#2c3546";
-    context.fill();
-    context.strokeStyle = "#0e1116";
-    context.lineWidth = 4;
-    context.stroke();
-    context.fillStyle = "rgba(255,255,255,0.12)";
-    context.fillRect(pillar.x + 6, pillar.y + 6, pillar.w - 12, 8);
-  }
-
-  function drawTarget(target: Target): void {
-    const x = target.x - target.size / 2;
-    const y = target.y - target.size / 2;
-    traceRoundRect(context, x, y, target.size, target.size, 8);
-    context.fillStyle = target.flash > 0 ? "#fff4d2" : target.kind === "enemy" ? "#ff5d5d" : "#d08a45";
-    context.fill();
-    context.strokeStyle = "#0e1116";
-    context.lineWidth = 4;
-    context.stroke();
-    context.fillStyle = "rgba(255,255,255,0.2)";
-    context.fillRect(x + 5, y + 5, target.size - 10, 7);
-    if (target.kind === "enemy") {
-      context.fillStyle = "#1a1208";
-      context.fillRect(target.x - 10, target.y - 4, 6, 6);
-      context.fillRect(target.x + 4, target.y - 4, 6, 6);
-    } else {
-      context.strokeStyle = "#6b3d1e";
-      context.lineWidth = 3;
-      context.beginPath();
-      context.moveTo(target.x - 8, target.y);
-      context.lineTo(target.x + 8, target.y);
-      context.moveTo(target.x, target.y - 8);
-      context.lineTo(target.x, target.y + 8);
-      context.stroke();
-    }
-    const barY = y - 10;
-    context.fillStyle = "#0e1116";
-    context.fillRect(x, barY, target.size, 5);
-    context.fillStyle = target.kind === "enemy" ? "#ffd0d0" : "#ffe0b0";
-    context.fillRect(x, barY, target.size * clamp(target.hp / target.hpMax, 0, 1), 5);
-  }
-
-  function drawShot(shot: Shot): void {
+  function drawTank(tank: Tank, chassis: string): void {
+    const cols = tank.grid[0]?.length ?? 1;
+    const rows = tank.grid.length;
+    const bodyW = cols * CELL;
+    const bodyH = rows * CELL;
     context.save();
-    context.translate(shot.x, shot.y);
-    context.rotate(Math.atan2(shot.vy, shot.vx));
-    context.fillStyle = shot.color;
-    traceRoundRect(context, -11, -3.5, shot.friendly ? 18 : 14, shot.friendly ? 7 : 7, 3);
-    context.fill();
-    context.restore();
-  }
-
-  function drawTank(): void {
-    context.save();
-    context.translate(tank.x + 5, tank.y + 7);
+    context.translate(tank.x + 4, tank.y + 6);
     context.rotate(tank.angle);
     context.fillStyle = "rgba(0,0,0,0.28)";
     context.beginPath();
-    context.ellipse(0, 0, bodyW * 0.46, bodyH * 0.48, 0, 0, Math.PI * 2);
+    context.ellipse(0, 0, bodyW * 0.42, bodyH * 0.42, 0, 0, Math.PI * 2);
     context.fill();
     context.restore();
 
-    const blink = tank.iframe > 0 && Math.floor(performance.now() / 80) % 2 === 0;
     context.save();
-    context.globalAlpha = blink ? 0.45 : 1;
+    context.globalAlpha = tank.flash > 0 ? 0.72 : 1;
     context.translate(tank.x, tank.y);
     context.rotate(tank.angle);
-
-    traceRoundRect(context, -bodyW / 2 - 5, -bodyH / 2 - 5, bodyW + 10, bodyH + 10, 10);
-    context.fillStyle = "#2a3142";
+    traceRoundRect(context, -bodyW / 2 - 4, -bodyH / 2 - 4, bodyW + 8, bodyH + 8, 12);
+    context.fillStyle = chassis;
     context.fill();
     context.strokeStyle = "#0e1116";
     context.lineWidth = 4;
     context.stroke();
-
     context.fillStyle = "#ffb703";
     context.beginPath();
     context.moveTo(0, -bodyH / 2 - 12);
-    context.lineTo(9, -bodyH / 2 + 2);
-    context.lineTo(-9, -bodyH / 2 + 2);
+    context.lineTo(10, -bodyH / 2 + 2);
+    context.lineTo(-10, -bodyH / 2 + 2);
     context.closePath();
     context.fill();
+    drawCells(tank, false);
+    context.restore();
 
-    const gap = 3;
+    context.save();
+    context.translate(tank.x, tank.y);
+    context.rotate(tank.turret);
+    drawCells(tank, true);
+    const origin = turretOrigin(cols, rows);
+    const top = cellCenter(origin.c, origin.r, cols, rows);
+    context.strokeStyle = "#ffb703";
+    context.lineWidth = 3;
+    traceRoundRect(context, top.x - CELL / 2 - 2, top.y - CELL / 2 - 2, TURRET_SIZE * CELL + 4, TURRET_SIZE * CELL + 4, 8);
+    context.stroke();
+    context.restore();
+
+    context.fillStyle = "#f6f1e6";
+    context.font = "700 14px Trebuchet MS, Verdana, sans-serif";
+    context.textAlign = "center";
+    context.fillText(tank.name, tank.x, tank.y - bodyH * 0.62);
+    const barW = 54;
+    context.fillStyle = "#0e1116";
+    context.fillRect(tank.x - barW / 2, tank.y - bodyH * 0.62 + 6, barW, 5);
+    context.fillStyle = tank.id === "player" ? "#7dcf6a" : "#ff5d5d";
+    context.fillRect(tank.x - barW / 2, tank.y - bodyH * 0.62 + 6, barW * clamp(tank.core / tank.coreMax, 0, 1), 5);
+  }
+
+  function drawCells(tank: Tank, turretLayer: boolean): void {
+    const cols = tank.grid[0]?.length ?? 1;
+    const rows = tank.grid.length;
     for (let r = 0; r < rows; r += 1) {
       for (let c = 0; c < cols; c += 1) {
-        const x = -bodyW / 2 + c * CELL + gap / 2;
-        const y = -bodyH / 2 + r * CELL + gap / 2;
-        const size = CELL - gap;
-        const id = grid[r][c];
+        const turret = isTurretCell(r, c, cols, rows);
+        if (turret !== turretLayer) continue;
+        const id = tank.grid[r][c];
+        const center = cellCenter(c, r, cols, rows);
+        const size = CELL - 3;
+        const x = center.x - size / 2;
+        const y = center.y - size / 2;
         const mod = id ? getModule(id) : undefined;
-        traceRoundRect(context, x, y, size, size, 5);
+        traceRoundRect(context, x, y, size, size, 4);
         context.fillStyle = mod?.color ?? "#141820";
         context.fill();
         context.lineWidth = 2;
         context.strokeStyle = "#0e1116";
         context.stroke();
-        if (mod) {
-          context.fillStyle = "rgba(255,255,255,0.22)";
-          context.fillRect(x + 3, y + 3, size - 6, 5);
-          drawGlyph(mod.kind, x + size / 2, y + size / 2, size * 0.28);
+        if (!id || !mod) continue;
+        context.fillStyle = "rgba(255,255,255,0.22)";
+        context.fillRect(x + 3, y + 3, size - 6, 4);
+        drawGlyph(mod.kind, center.x, center.y, size * 0.26);
+        const plateMax = blockPlate(id);
+        const left = plateMax > 0 ? tank.plate[r][c] / plateMax : 0;
+        if (left < 0.999) {
+          context.fillStyle = "rgba(14,17,22,0.45)";
+          context.fillRect(x + 3, y + size - 6, size - 6, 3);
+          context.fillStyle = "#f6f1e6";
+          context.fillRect(x + 3, y + size - 6, (size - 6) * clamp(left, 0, 1), 3);
         }
       }
     }
-
-    context.rotate(tank.turret - tank.angle);
-    context.fillStyle = tank.flash > 0 ? "#fff1c9" : "#d5ddea";
-    context.beginPath();
-    context.arc(0, 0, 16, 0, Math.PI * 2);
-    context.fill();
-    context.strokeStyle = "#0e1116";
-    context.lineWidth = 3;
-    context.stroke();
-    traceRoundRect(context, -5, -40, 10, 26, 3);
-    context.fillStyle = "#e7edf5";
-    context.fill();
-    context.stroke();
-    context.fillStyle = "#1a1e27";
-    context.fillRect(-4, -40, 8, 5);
-    if (tank.flash > 0) {
-      context.fillStyle = "rgba(255, 214, 120, 0.9)";
-      context.beginPath();
-      context.arc(0, -46, 7, 0, Math.PI * 2);
-      context.fill();
-    }
-    context.restore();
   }
 
   function drawGlyph(kind: ModuleKind, x: number, y: number, s: number): void {
@@ -797,37 +539,34 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     context.lineCap = "round";
     context.beginPath();
     if (kind === "armor") {
-      context.rect(-s * 0.45, -s * 0.45, s * 0.9, s * 0.9);
+      context.rect(-s, -s, s * 2, s * 2);
       context.stroke();
     } else if (kind === "tracks") {
-      context.moveTo(-s, -s * 0.45);
-      context.lineTo(s, -s * 0.45);
+      context.moveTo(-s, -s * 0.5);
+      context.lineTo(s, -s * 0.5);
       context.moveTo(-s, 0);
       context.lineTo(s, 0);
-      context.moveTo(-s, s * 0.45);
-      context.lineTo(s, s * 0.45);
+      context.moveTo(-s, s * 0.5);
+      context.lineTo(s, s * 0.5);
       context.stroke();
     } else if (kind === "power") {
-      context.moveTo(s * 0.1, -s);
-      context.lineTo(-s * 0.45, s * 0.05);
-      context.lineTo(s * 0.05, s * 0.05);
+      context.moveTo(s * 0.15, -s);
+      context.lineTo(-s * 0.45, s * 0.1);
+      context.lineTo(0, s * 0.1);
       context.lineTo(-s * 0.1, s);
-      context.lineTo(s * 0.5, -s * 0.08);
-      context.lineTo(0, -s * 0.08);
+      context.lineTo(s * 0.55, -s * 0.05);
       context.closePath();
       context.fill();
     } else if (kind === "fuel") {
-      context.arc(0, s * 0.1, s * 0.48, 0, Math.PI * 2);
+      context.arc(0, 0, s * 0.55, 0, Math.PI * 2);
       context.fill();
     } else if (kind === "engine") {
-      context.arc(0, 0, s * 0.46, 0, Math.PI * 2);
+      context.arc(0, 0, s * 0.5, 0, Math.PI * 2);
       context.stroke();
     } else {
-      context.moveTo(-s, s * 0.25);
-      context.lineTo(s * 0.2, s * 0.25);
-      context.lineTo(s, -s * 0.05);
-      context.lineTo(s, s * 0.55);
-      context.lineTo(s * 0.2, s * 0.25);
+      context.moveTo(-s, s * 0.2);
+      context.lineTo(s * 0.15, s * 0.2);
+      context.lineTo(s, -s * 0.15);
       context.stroke();
     }
     context.restore();
@@ -844,22 +583,69 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     }
     const viewW = Math.max(1, rect.width);
     const viewH = Math.max(1, rect.height);
-    const zoom = Math.min(viewW, viewH) / 560;
-    const thumbBias = viewH > viewW ? 78 : 0;
-    let camX = tank.x - viewW / (2 * zoom);
-    let camY = tank.y - (viewH / 2 - thumbBias) / zoom;
-    const worldW = viewW / zoom;
-    const worldH = viewH / zoom;
-    camX = clamp(camX, -120, ARENA_W - worldW + 120);
-    camY = clamp(camY, -120, ARENA_H - worldH + 120);
+    const dist = Math.hypot(player.x - rival.x, player.y - rival.y);
+    const focus = clamp(dist + 380, 620, 1040);
+    const zoom = Math.min(viewW, viewH) / focus;
+    const midX = (player.x + rival.x) / 2;
+    const midY = (player.y + rival.y) / 2;
+    const thumbBias = viewH > viewW ? 36 : 0;
+    let camX = midX - viewW / (2 * zoom);
+    let camY = midY - (viewH / 2 - thumbBias) / zoom;
+    camX = clamp(camX, -160, ARENA_W - viewW / zoom + 160);
+    camY = clamp(camY, -160, ARENA_H - viewH / zoom + 160);
     return { zoom, camX, camY, dpr, rect };
   }
 
   function clientToWorld(clientX: number, clientY: number): { x: number; y: number } {
     const view = currentView();
-    const sx = clientX - view.rect.left;
-    const sy = clientY - view.rect.top;
-    return { x: sx / view.zoom + view.camX, y: sy / view.zoom + view.camY };
+    return {
+      x: (clientX - view.rect.left) / view.zoom + view.camX,
+      y: (clientY - view.rect.top) / view.zoom + view.camY,
+    };
+  }
+
+  function commandsFromPlayer(source: InputController, tank: Tank): TankCommands {
+    const drive = source.getDrive();
+    const aim = source.getAimStick();
+    if (aim.active) return { forward: drive.forward, turn: drive.turn, aimAngle: aim.angle, fire: true };
+    let aimAngle: number | null = null;
+    const mouse = source.getMouseClient();
+    if (mouse.valid) {
+      const world = clientToWorld(mouse.x, mouse.y);
+      aimAngle = Math.atan2(world.x - tank.x, -(world.y - tank.y));
+    }
+    return { forward: drive.forward, turn: drive.turn, aimAngle, fire: source.isFiringFromPointer() };
+  }
+
+  function syncHud(): void {
+    const stats = computeStats(player.grid);
+    coreFill.style.width = `${clamp(player.core / player.coreMax, 0, 1) * 100}%`;
+    fuelFill.style.width = `${stats.fuel > 0 ? clamp(player.fuel / stats.fuel, 0, 1) * 100 : 0}%`;
+    rivalFill.style.width = `${clamp(rival.core / rival.coreMax, 0, 1) * 100}%`;
+    const coreText = coreLabel.querySelector(".meter-value");
+    const fuelText = fuelLabel.querySelector(".meter-value");
+    const rivalText = rivalLabel.querySelector(".meter-value");
+    if (coreText) coreText.textContent = String(Math.max(0, Math.ceil(player.core)));
+    if (fuelText) fuelText.textContent = String(Math.ceil(player.fuel));
+    if (rivalText) rivalText.textContent = String(Math.max(0, Math.ceil(rival.core)));
+    coreMeter.classList.toggle("low", player.core / player.coreMax < 0.3);
+    scrapValue.textContent = `${bank.toLocaleString()} scrap`;
+    const next = statusLine(stats.plates, stats.weaponCount, stats.fireRate);
+    if (next !== lastStatus) {
+      lastStatus = next;
+      status.textContent = next;
+      status.hidden = next.length === 0;
+    }
+  }
+
+  function statusLine(plates: number, weapons: number, rate: number): string {
+    if (phase === "win") return "Rival down";
+    if (phase === "lose") return "";
+    if (player.fuel <= 0) return "Fuel empty — crawling";
+    if (weapons === 0) return "No cannon left";
+    if (rate <= 0) return "Cannons unpowered";
+    if (plates === 0) return "Armor gone — core exposed";
+    return "";
   }
 
   function frame(now: number): void {
@@ -875,11 +661,10 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       acc += dt;
       const step = 1 / 60;
       let guard = 0;
-      while (acc >= step && guard < 4) {
+      while (acc >= step && guard < 4 && phase === "play") {
         update(step);
         acc -= step;
         guard += 1;
-        if (phase !== "play") break;
       }
     } else {
       stepDecor(dt);
@@ -893,31 +678,23 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     if (event.code === "Escape") options.onExit();
   };
   exit.addEventListener("click", () => options.onExit());
-  endMenu.addEventListener("click", () => options.onExit());
+  garage.addEventListener("click", () => options.onGarage());
   retry.addEventListener("click", () => boot());
   window.addEventListener("keydown", onKey);
 
   if (import.meta.env.DEV) {
     window.__TANK_DEBUG__ = () => ({
-      x: tank.x,
-      y: tank.y,
-      angle: tank.angle,
-      turret: tank.turret,
-      hp: tank.hp,
-      fuel: tank.fuel,
+      x: player.x,
+      y: player.y,
+      angle: player.angle,
+      turret: player.turret,
+      core: player.core,
+      fuel: player.fuel,
       shots: shots.length,
-      enemies: targets.filter((target) => target.kind === "enemy" && target.alive).length,
-      crates: targets.filter((target) => target.kind === "crate" && target.alive).length,
-      bank,
-      earned,
       phase,
-      targets: targets.map((target) => ({
-        x: target.x,
-        y: target.y,
-        kind: target.kind,
-        alive: target.alive,
-        hp: target.hp,
-      })),
+      guns: listGuns(player.grid).map((gun) => gun.mount),
+      rivalCore: rival.core,
+      rivalTurret: rival.turret,
     });
   }
 
@@ -932,6 +709,112 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     window.removeEventListener("keydown", onKey);
     if (import.meta.env.DEV && window.__TANK_DEBUG__) delete window.__TANK_DEBUG__;
   };
+
+  function separateTanks(): void {
+    const dx = rival.x - player.x;
+    const dy = rival.y - player.y;
+    const min = player.radius + rival.radius * 0.85;
+    const dist = Math.hypot(dx, dy);
+    if (dist <= 0 || dist >= min) return;
+    const push = (min - dist) / 2;
+    const nx = dx / dist;
+    const ny = dy / dist;
+    const a = resolveCircle(player.x - nx * push, player.y - ny * push, player.radius);
+    const b = resolveCircle(rival.x + nx * push, rival.y + ny * push, rival.radius);
+    player.x = a.x;
+    player.y = a.y;
+    rival.x = b.x;
+    rival.y = b.y;
+  }
+
+  function stepDecor(dt: number): void {
+    for (let i = particles.length - 1; i >= 0; i -= 1) {
+      const bit = particles[i];
+      bit.life -= dt;
+      bit.x += bit.vx * dt;
+      bit.y += bit.vy * dt;
+      if (bit.life <= 0) particles.splice(i, 1);
+    }
+    for (let i = floaters.length - 1; i >= 0; i -= 1) {
+      const floater = floaters[i];
+      floater.life -= dt;
+      floater.y -= 26 * dt;
+      if (floater.life <= 0) floaters.splice(i, 1);
+    }
+  }
+
+  function burst(x: number, y: number, color: string, count: number): void {
+    for (let i = 0; i < count; i += 1) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 40 + Math.random() * 120;
+      particles.push({
+        x,
+        y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 0.35 + Math.random() * 0.25,
+        max: 0.6,
+        color,
+        size: 4 + Math.random() * 5,
+      });
+    }
+  }
+}
+
+function spawnTank(
+  id: Side,
+  name: string,
+  blueprint: (string | null)[][],
+  x: number,
+  y: number,
+  angle: number,
+): Tank {
+  const grid = cloneGrid(blueprint);
+  const stats = computeStats(grid);
+  const cols = grid[0]?.length ?? 1;
+  const rows = grid.length;
+  return {
+    id,
+    name,
+    x,
+    y,
+    angle,
+    turret: angle,
+    vx: 0,
+    vy: 0,
+    core: stats.hp,
+    coreMax: stats.hp,
+    fuel: stats.fuel,
+    cooldown: 0.45,
+    flash: 0,
+    grid,
+    plate: grid.map((row) => row.map((cell) => (cell ? blockPlate(cell) : 0))),
+    blueprint: cloneGrid(blueprint),
+    radius: Math.max(cols, rows) * CELL * 0.34,
+  };
+}
+
+function defeated(tank: Tank): boolean {
+  if (tank.core <= 0) return true;
+  return !tank.grid.some((row) => row.some((cell) => cell));
+}
+
+function insideFootprint(tank: Tank, x: number, y: number): boolean {
+  const cols = tank.grid[0]?.length ?? 1;
+  const rows = tank.grid.length;
+  const hull = worldToLocal(x - tank.x, y - tank.y, tank.angle);
+  if (Math.abs(hull.x) <= (cols * CELL) / 2 && Math.abs(hull.y) <= (rows * CELL) / 2) return true;
+  const local = worldToLocal(x - tank.x, y - tank.y, tank.turret);
+  const origin = turretOrigin(cols, rows);
+  const top = cellCenter(origin.c, origin.r, cols, rows);
+  const x0 = top.x - CELL / 2;
+  const y0 = top.y - CELL / 2;
+  const span = TURRET_SIZE * CELL;
+  return local.x >= x0 && local.x <= x0 + span && local.y >= y0 && local.y <= y0 + span;
+}
+
+function shotView(shot: Shot): ShotView {
+  return { x: shot.x, y: shot.y, vx: shot.vx, vy: shot.vy };
 }
 
 function joystick(kind: "move" | "aim", label: string, aria: string): {
@@ -959,8 +842,8 @@ function resolveCircle(x: number, y: number, r: number): { x: number; y: number 
     for (const pillar of PILLARS) {
       const nearestX = clamp(px, pillar.x, pillar.x + pillar.w);
       const nearestY = clamp(py, pillar.y, pillar.y + pillar.h);
-      let dx = px - nearestX;
-      let dy = py - nearestY;
+      const dx = px - nearestX;
+      const dy = py - nearestY;
       const distSq = dx * dx + dy * dy;
       if (distSq >= r * r) continue;
       if (distSq < 1e-6) {
@@ -976,20 +859,11 @@ function resolveCircle(x: number, y: number, r: number): { x: number; y: number 
         continue;
       }
       const dist = Math.sqrt(distSq);
-      const push = r - dist + 0.25;
-      px += (dx / dist) * push;
-      py += (dy / dist) * push;
+      px += (dx / dist) * (r - dist + 0.25);
+      py += (dy / dist) * (r - dist + 0.25);
     }
   }
   return { x: clamp(px, r, ARENA_W - r), y: clamp(py, r, ARENA_H - r) };
-}
-
-function circleHitsRect(cx: number, cy: number, cr: number, rect: Pillar): boolean {
-  const nearestX = clamp(cx, rect.x, rect.x + rect.w);
-  const nearestY = clamp(cy, rect.y, rect.y + rect.h);
-  const dx = cx - nearestX;
-  const dy = cy - nearestY;
-  return dx * dx + dy * dy < cr * cr;
 }
 
 function shotHitsPillar(shot: Shot): boolean {
@@ -1000,15 +874,4 @@ function shotHitsPillar(shot: Shot): boolean {
       shot.y > pillar.y - shot.r &&
       shot.y < pillar.y + pillar.h + shot.r,
   );
-}
-
-function mulberry32(seed: number): () => number {
-  let state = seed;
-  return () => {
-    state |= 0;
-    state = (state + 0x6d2b79f5) | 0;
-    let t = Math.imul(state ^ (state >>> 15), 1 | state);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
 }

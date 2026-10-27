@@ -42,6 +42,7 @@ function show(screen: ScreenId): void {
       persist();
     },
     onExit: () => show("menu"),
+    onGarage: () => show("garage"),
   });
 }
 
