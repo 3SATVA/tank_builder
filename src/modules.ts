@@ -14,8 +14,8 @@ export const MODULES: readonly ModuleDef[] = [
     name: "Armor",
     starter: true,
     color: "#6f93b5",
-    blurb: "+40 hull",
-    stats: { hp: 40 },
+    blurb: "48 plate",
+    stats: {},
   },
   {
     id: "tracks",
@@ -78,22 +78,66 @@ export function modulesFor(unlocked: readonly string[]): ModuleDef[] {
   return MODULES.filter((mod) => mod.starter || owned.has(mod.id));
 }
 
-/** Bare hull before any blocks. Kept here so the sheet and the sim share one baseline. */
+/** Bare core before any blocks. Armor does not add to this; it soaks hits on its own cell. */
 export const BASE_HULL = {
-  hp: 50,
+  hp: 70,
   speed: 28,
   turn: 18,
   fuel: 36,
 } as const;
 
+export const GRID_COLS = 7;
+export const GRID_ROWS = 5;
+export const TURRET_SIZE = 3;
+export const ARMOR_PLATE = 48;
+export const MODULE_PLATE = 32;
+
+/** Top-left cell of the centered 3×3 turret. */
+export function turretOrigin(cols = GRID_COLS, rows = GRID_ROWS): { c: number; r: number } {
+  return {
+    c: Math.floor((cols - TURRET_SIZE) / 2),
+    r: Math.floor((rows - TURRET_SIZE) / 2),
+  };
+}
+
+export function isTurretCell(row: number, col: number, cols = GRID_COLS, rows = GRID_ROWS): boolean {
+  const origin = turretOrigin(cols, rows);
+  return col >= origin.c && col < origin.c + TURRET_SIZE && row >= origin.r && row < origin.r + TURRET_SIZE;
+}
+
+/** Center of the 3×3. A block here soaks first; an empty center takes core damage. */
+export function isCoreCell(row: number, col: number, cols = GRID_COLS, rows = GRID_ROWS): boolean {
+  const origin = turretOrigin(cols, rows);
+  return row === origin.r + 1 && col === origin.c + 1;
+}
+
+/** How much damage a block soaks before it pops off. Armor soaks more than anything else. */
+export function blockPlate(moduleId: string): number {
+  const mod = getModule(moduleId);
+  if (!mod) return 0;
+  return mod.kind === "armor" ? ARMOR_PLATE : MODULE_PLATE;
+}
+
+export function cloneGrid(grid: ReadonlyArray<ReadonlyArray<string | null>>): (string | null)[][] {
+  return grid.map((row) => row.slice());
+}
+
 /**
- * 5×3 starter hull. Row 0 is the front. The center cell is power, which sits
- * under the turret. Two cannons draw 2 power and the single power block supplies 2.
+ * 7×5 box. Row 0 is the front. The centered 3×3 (rows 1–3, cols 2–4) is the turret.
+ * Two cannons sit on the hull and fire with the hull; two sit on the turret and aim.
+ * Two power cells exactly feed the four cannons.
  */
 export function createDefaultGrid(): (string | null)[][] {
   return [
-    ["cannon", "armor", "armor", "armor", "cannon"],
-    ["tracks", "engine", "power", "engine", "tracks"],
-    ["tracks", "fuel", "armor", "fuel", "tracks"],
+    [null, "armor", "cannon", "armor", "cannon", "armor", null],
+    ["tracks", "engine", "cannon", null, "cannon", "engine", "tracks"],
+    [null, "fuel", "armor", "power", "armor", "fuel", null],
+    [null, "fuel", null, "power", null, "fuel", null],
+    ["armor", "tracks", null, "armor", null, "tracks", "armor"],
   ];
+}
+
+/** Same module rules as the player. A future online rival is just another grid. */
+export function createRivalGrid(): (string | null)[][] {
+  return createDefaultGrid();
 }

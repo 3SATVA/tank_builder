@@ -1,13 +1,14 @@
-import { createDefaultGrid, getModule } from "./modules";
+import { cloneGrid, createDefaultGrid, getModule, GRID_COLS, GRID_ROWS } from "./modules";
 import type { SaveData, ShopItem } from "./types";
 
-const KEY = "tank-builder-save-v1";
+const KEY = "tank-builder-save-v2";
+const OLD_KEY = "tank-builder-save-v1";
 
-function blank(): SaveData {
+function blank(currency = 0, unlocked: string[] = []): SaveData {
   return {
     version: 1,
-    currency: 0,
-    unlocked: [],
+    currency,
+    unlocked,
     grid: createDefaultGrid(),
   };
 }
@@ -24,15 +25,25 @@ function isGrid(value: unknown): value is (string | null)[][] {
   );
 }
 
+function fitsCurrentTank(grid: (string | null)[][]): boolean {
+  return grid.length === GRID_ROWS && grid[0]?.length === GRID_COLS;
+}
+
+function readCurrency(raw: Partial<SaveData> | null): number {
+  return raw && Number.isFinite(raw.currency) ? Math.max(0, Math.floor(raw.currency as number)) : 0;
+}
+
+function readUnlocked(raw: Partial<SaveData> | null): string[] {
+  if (!raw || !Array.isArray(raw.unlocked)) return [];
+  return raw.unlocked.filter((id): id is string => typeof id === "string" && Boolean(getModule(id)));
+}
+
+/** Old 5×3 saves keep their scrap and unlocks, and get a fresh 7×5 hull. */
 function sanitize(raw: Partial<SaveData> | null): SaveData {
-  const fallback = blank();
-  if (!raw || raw.version !== 1) return fallback;
-  const currency = Number.isFinite(raw.currency) ? Math.max(0, Math.floor(raw.currency as number)) : 0;
-  const unlocked = Array.isArray(raw.unlocked)
-    ? raw.unlocked.filter((id): id is string => typeof id === "string" && Boolean(getModule(id)))
-    : [];
-  if (!isGrid(raw.grid)) {
-    return { ...fallback, currency, unlocked };
+  const currency = readCurrency(raw);
+  const unlocked = readUnlocked(raw);
+  if (!raw || !isGrid(raw.grid) || !fitsCurrentTank(raw.grid)) {
+    return blank(currency, unlocked);
   }
   const grid = raw.grid.map((row) => row.map((id) => (id && getModule(id) ? id : null)));
   return { version: 1, currency, unlocked, grid };
@@ -40,9 +51,15 @@ function sanitize(raw: Partial<SaveData> | null): SaveData {
 
 export function loadSave(): SaveData {
   try {
-    const text = localStorage.getItem(KEY);
-    if (!text) return blank();
-    return sanitize(JSON.parse(text) as Partial<SaveData>);
+    const current = localStorage.getItem(KEY);
+    if (current) return sanitize(JSON.parse(current) as Partial<SaveData>);
+    const legacy = localStorage.getItem(OLD_KEY);
+    if (!legacy) return blank();
+    const migrated = sanitize(JSON.parse(legacy) as Partial<SaveData>);
+    migrated.grid = createDefaultGrid();
+    localStorage.removeItem(OLD_KEY);
+    saveGame(migrated);
+    return migrated;
   } catch {
     return blank();
   }
@@ -53,7 +70,7 @@ export function saveGame(data: SaveData): void {
     version: 1,
     currency: Math.max(0, Math.floor(data.currency)),
     unlocked: [...data.unlocked],
-    grid: data.grid.map((row) => row.slice()),
+    grid: cloneGrid(data.grid),
   };
   localStorage.setItem(KEY, JSON.stringify(payload));
 }

@@ -1,6 +1,6 @@
 # Tank Builder
 
-A top-down tank you assemble out of blocks, then drive. Static Vite + TypeScript app — no backend. Layout and scrap are stored in `localStorage`.
+A top-down tank you assemble out of blocks, then duel. Static Vite + TypeScript app — no backend. Layout and scrap are stored in `localStorage`.
 
 ```bash
 npm install
@@ -10,8 +10,8 @@ npm run build
 
 ## Screens
 
-- **Garage** — tap a block in the palette, tap a bay to place it. Tap a bay that already holds that block to remove it. The top row is the front of the hull.
-- **Battle** — drive the tank you built. Destroy wandering blocks and crates for scrap.
+- **Garage** — tap a block in the palette, tap a bay to place it. Tap a bay that already holds that block to remove it. The top row is the front of the hull. The gold 3×3 in the middle is the turret; those bays are module slots too.
+- **Battle** — a 1v1 against another built tank. The rival is a bot today. It uses the same module grid and the same drive commands a remote player would send later.
 - **Shop** — scrap counter is live. The shelves are empty: “New modules coming soon.”
 
 ## Controls
@@ -23,24 +23,26 @@ Left stick (or WASD / arrows):
 - Left and right turn the hull
 - Diagonals do both
 
-Right stick rotates the turret toward that direction and fires while you hold it off-center. Mouse aim and click (or space) do the same thing. Escape or Menu leaves the arena.
+Right stick rotates the 3×3 turret toward that direction and fires every powered gun while you hold it off-center. Turret guns shoot along the aim. Hull guns stay fixed to the hull and shoot the way the hull faces. Mouse aim and click (or space) do the same thing. Escape or Menu leaves the arena. A win pays 50 scrap and offers a rematch or a return to the garage.
 
 ## Modules
 
-Starter blocks, added on top of a bare hull (50 hull, 28 speed, 18 turning, 36 fuel):
+Starter blocks, added on top of a bare core (70 core, 28 speed, 18 turning, 36 fuel). Armor does not add core HP. Each armor block soaks 48 damage on its own cell; every other block soaks 32. Overflow past a broken plate comes off the core. A shot that lands in an empty turret bay also hits the core, so opening a hole in the gold 3×3 is how you finish a tank. The tank is out when the core hits zero or every block is gone. Lost blocks change speed, turning, fuel, power, and guns immediately.
 
 | Block | Effect |
 | --- | --- |
-| Armor | +40 hull |
+| Armor | 32 plate on that cell |
 | Tracks | +36 turning |
 | Power | +2 power supply |
 | Fuel | +40 fuel |
 | Engine | +44 speed |
-| Cannon | +16 damage, +0.55 fire rate, uses 1 power |
+| Cannon | 16 damage, 0.55 shots/s, uses 1 power |
 
-The default 5×3 loadout is two cannons, four armor, four tracks, two engines, two fuel, and one power cell under the turret — enough power to run both guns. Fire rate drops when weapon demand is higher than power supply, and hits zero with no power. An empty fuel tank crawls at a quarter speed.
+The default 7×5 loadout puts a ring of hull around a centered 3×3 turret: four cannons (two on the hull, two on the turret), eight armor, four tracks, two engines, four fuel, and two power cells. Fire rate is the average of the guns still mounted, scaled by power. It drops when weapon demand is higher than supply, and hits zero with no power. An empty fuel tank crawls at a quarter speed.
 
-New block types are another entry in `src/modules.ts`. Shop stock is the `SHOP_ITEMS` list, which is intentionally empty.
+Saves use `tank-builder-save-v2`. An older 5×3 save keeps its scrap and unlocks, and the layout resets to the new hull.
+
+New block types are another entry in `src/modules.ts`. Shop stock is the `SHOP_ITEMS` list, which is intentionally empty. A rival is `createRivalGrid()` plus a `TankController` in `src/control.ts`.
 
 ## Hosting
 

@@ -45,7 +45,10 @@ export interface SaveData {
 }
 
 export interface TankStats {
+  /** Core HP. Armor is ablative plate HP, not part of this pool. */
   hp: number;
+  /** How many armor blocks are still mounted. */
+  plates: number;
   speed: number;
   turn: number;
   fuel: number;

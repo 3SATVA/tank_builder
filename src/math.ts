@@ -16,6 +16,20 @@ export function rotateToward(from: number, to: number, maxStep: number): number 
   return from + step;
 }
 
+/** Local point to world offset. Angle 0 is up; positive rotation is clockwise. */
+export function localToWorld(lx: number, ly: number, angle: number): { x: number; y: number } {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return { x: lx * cos - ly * sin, y: lx * sin + ly * cos };
+}
+
+/** Inverse of localToWorld. */
+export function worldToLocal(dx: number, dy: number, angle: number): { x: number; y: number } {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return { x: dx * cos + dy * sin, y: -dx * sin + dy * cos };
+}
+
 export function traceRoundRect(
   ctx: CanvasRenderingContext2D,
   x: number,

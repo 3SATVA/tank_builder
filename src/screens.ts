@@ -1,6 +1,6 @@
 import { el } from "./dom";
 import { iconSvg } from "./icons";
-import { createDefaultGrid, getModule, modulesFor, SHOP_ITEMS } from "./modules";
+import { createDefaultGrid, getModule, isCoreCell, isTurretCell, modulesFor, SHOP_ITEMS } from "./modules";
 import { purchase } from "./save";
 import { sfxTap } from "./sfx";
 import { computeStats } from "./stats";
@@ -29,7 +29,7 @@ export function renderMenu(save: SaveData, go: (screen: ScreenId) => void): HTML
   const actions = el("div", "menu-actions");
   actions.append(
     menuButton("Garage", "Build and refit the hull", () => go("garage")),
-    menuButton("Battle", "Drive the tank you built", () => go("battle"), true),
+    menuButton("Battle", "Duel another built tank", () => go("battle"), true),
     menuButton("Shop", "Spend scrap on new blocks", () => go("shop")),
   );
 
@@ -45,7 +45,7 @@ function heroCopy(): HTMLElement {
     el(
       "p",
       "lede",
-      "Fill the hull with armor, tracks, fuel, power, engines, and cannons. The arena uses whatever you bolt on.",
+      "Fill the hull and the gold 3×3 turret with armor, tracks, fuel, power, engines, and cannons. The duel uses whatever you bolt on.",
     ),
   );
   return copy;
@@ -128,7 +128,11 @@ function buildStage(
   const stage = el("section", "builder");
   stage.append(
     el("h2", undefined, "Hull"),
-    el("p", "hint", "Pick a block, tap a bay to place it. Tap a bay that already holds that block to pull it off."),
+    el(
+      "p",
+      "hint",
+      "Pick a block, tap a bay to place it. Tap a bay that already holds that block to pull it off. The gold 3×3 is the turret — it rotates toward your aim. Guns on the hull fire the way the hull faces. A shot through a hole in the turret hits the core.",
+    ),
   );
 
   const wrap = el("div", "tank-stage");
@@ -139,24 +143,30 @@ function buildStage(
   grid.setAttribute("role", "grid");
   grid.setAttribute("aria-label", "Tank hull");
 
+  const rows = save.grid.length;
   save.grid.forEach((row, r) => {
     row.forEach((id, c) => {
       const mod = id ? getModule(id) : undefined;
+      const turret = isTurretCell(r, c, cols, rows);
       const cell = el("button", mod ? "cell filled" : "cell empty");
+      if (turret) cell.classList.add("turret");
+      if (isCoreCell(r, c, cols, rows)) cell.classList.add("core");
       cell.type = "button";
       cell.style.setProperty("--cell", mod?.color ?? "transparent");
       if (mod && mod.id === selected) cell.classList.add("matches");
       cell.dataset.row = String(r);
       cell.dataset.col = String(c);
+      if (turret) cell.dataset.turret = "true";
       if (mod) cell.dataset.module = mod.id;
       cell.setAttribute("role", "gridcell");
+      const place = `${turret ? "Turret" : "Hull"} row ${r + 1} column ${c + 1}`;
       cell.setAttribute(
         "aria-label",
         mod
           ? mod.id === selected
-            ? `${mod.name}, row ${r + 1} column ${c + 1}. Tap to remove.`
-            : `${mod.name}, row ${r + 1} column ${c + 1}. Tap to replace.`
-          : `Empty bay, row ${r + 1} column ${c + 1}. Tap to place.`,
+            ? `${mod.name}, ${place}. Tap to remove.`
+            : `${mod.name}, ${place}. Tap to replace.`
+          : `Empty bay, ${place}. Tap to place.`,
       );
       if (mod) {
         const swatch = el("span", "cell-swatch");
@@ -174,9 +184,7 @@ function buildStage(
     });
   });
 
-  const turret = el("div", "turret-overlay");
-  turret.setAttribute("aria-hidden", "true");
-  frame.append(grid, turret);
+  frame.append(grid);
   wrap.append(frame);
 
   const tools = el("div", "builder-tools");
@@ -210,10 +218,11 @@ function statPanel(stats: TankStats): HTMLElement {
   panel.append(el("h2", undefined, "Combined"));
   const list = el("dl", "stat-list");
   const rows: [string, number, number, string][] = [
-    ["Hull", stats.hp, 360, String(Math.round(stats.hp))],
+    ["Core", stats.hp, 140, String(Math.round(stats.hp))],
+    ["Plates", stats.plates, 16, String(stats.plates)],
     ["Speed", stats.speed, 250, String(Math.round(stats.speed))],
     ["Turning", stats.turn, 250, String(Math.round(stats.turn))],
-    ["Fuel", stats.fuel, 240, String(Math.round(stats.fuel))],
+    ["Fuel", stats.fuel, 280, String(Math.round(stats.fuel))],
   ];
   for (const [label, value, max, text] of rows) {
     list.append(statRow(label, value / max, text));
@@ -289,7 +298,7 @@ function composition(save: SaveData): HTMLElement {
       return mod ? `${count} ${mod.name.toLowerCase()}` : "";
     })
     .filter(Boolean);
-  const line = el("p", "composition", parts.length > 0 ? parts.join(" · ") : "Empty hull — the turret is still mounted.");
+  const line = el("p", "composition", parts.length > 0 ? parts.join(" · ") : "Empty hull — bolt blocks onto the bays.");
   return line;
 }
 
@@ -327,7 +336,7 @@ function emptyShop(): HTMLElement {
     el(
       "p",
       undefined,
-      "Scrap from wrecked targets is banked and ready. The racks are empty until the next shipment of blocks.",
+      "Scrap from won duels is banked and ready. The racks are empty until the next shipment of blocks.",
     ),
   );
   return empty;

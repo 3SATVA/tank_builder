@@ -11,6 +11,7 @@ export function computeStats(grid: ReadonlyArray<ReadonlyArray<string | null>>):
   let damageSum = 0;
   let fireRate = 0;
   let weaponCount = 0;
+  let plates = 0;
 
   for (const row of grid) {
     for (const id of row) {
@@ -23,6 +24,7 @@ export function computeStats(grid: ReadonlyArray<ReadonlyArray<string | null>>):
       fuel += mod.stats.fuel ?? 0;
       power += mod.stats.power ?? 0;
       powerUse += mod.stats.powerUse ?? 0;
+      if (mod.kind === "armor") plates += 1;
       if (mod.kind === "weapon") {
         weaponCount += 1;
         damageSum += mod.stats.damage ?? 0;
@@ -32,10 +34,12 @@ export function computeStats(grid: ReadonlyArray<ReadonlyArray<string | null>>):
   }
 
   const powerFactor = powerUse <= 0 ? 1 : Math.min(1, power / powerUse);
-  const canFire = weaponCount > 0 && powerFactor > 0 && fireRate > 0;
+  const averageRate = weaponCount > 0 ? fireRate / weaponCount : 0;
+  const canFire = weaponCount > 0 && powerFactor > 0 && averageRate > 0;
 
   return {
     hp,
+    plates,
     speed,
     turn,
     fuel,
@@ -43,7 +47,7 @@ export function computeStats(grid: ReadonlyArray<ReadonlyArray<string | null>>):
     powerUse,
     damage: weaponCount > 0 ? damageSum / weaponCount : 0,
     salvoDamage: damageSum,
-    fireRate: canFire ? fireRate * powerFactor : 0,
+    fireRate: canFire ? averageRate * powerFactor : 0,
     weaponCount,
     powerFactor: weaponCount === 0 ? 1 : powerFactor,
   };
