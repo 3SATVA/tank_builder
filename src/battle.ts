@@ -110,6 +110,7 @@ export interface TankDebug {
   bank: number;
   earned: number;
   phase: "play" | "dead";
+  targets: { x: number; y: number; kind: "enemy" | "crate"; alive: boolean; hp: number }[];
 }
 
 declare global {
@@ -195,6 +196,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   let earned = 0;
   let phase: "play" | "dead" = "play";
   let cooldown = 0;
+  let warmup = 6;
   let shake = 0;
   let lastStatus = "";
   let raf = 0;
@@ -231,8 +233,9 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     targets = [];
     const rand = mulberry32(0x5eed);
     for (let i = 0; i < 6; i += 1) targets.push(makeTarget("crate", rand));
-    for (let i = 0; i < 4; i += 1) targets.push(makeTarget("enemy", rand));
+    for (let i = 0; i < 3; i += 1) targets.push(makeTarget("enemy", rand));
     cooldown = 0;
+    warmup = 6;
     earned = 0;
     phase = "play";
     shake = 0;
@@ -255,7 +258,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       hpMax: hp,
       alive: true,
       respawn: 0,
-      shoot: 1.2 + rand() * 1.4,
+      shoot: 2.6 + rand() * 2,
       touch: 0,
       flash: 0,
       wander: rand() * 1.5,
@@ -318,6 +321,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   }
 
   function update(dt: number): void {
+    if (warmup > 0) warmup = Math.max(0, warmup - dt);
     const drive = input.getDrive();
     const throttle = Math.max(Math.abs(drive.forward), Math.abs(drive.turn) * 0.5);
     if (tank.fuel > 0 && throttle > 0.02) {
@@ -386,7 +390,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       }
       if (target.kind === "enemy") updateEnemy(target, dt);
       const dist = Math.hypot(target.x - tank.x, target.y - tank.y);
-      if (target.kind === "enemy" && dist < radius + target.size * 0.45 && target.touch <= 0) {
+      if (warmup <= 0 && target.kind === "enemy" && dist < radius + target.size * 0.45 && target.touch <= 0) {
         target.touch = 0.85;
         const nx = (tank.x - target.x) / (dist || 1);
         const ny = (tank.y - target.y) / (dist || 1);
@@ -395,7 +399,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
         const bumped = resolveCircle(tank.x, tank.y, radius);
         tank.x = bumped.x;
         tank.y = bumped.y;
-        hurtPlayer(18);
+        hurtPlayer(12);
       }
     }
     separateTargets();
@@ -437,12 +441,12 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     if (target.wander <= 0) {
       target.wander = 1.1 + Math.random() * 1.8;
       const angle = Math.random() * Math.PI * 2;
-      const speed = 42 + Math.random() * 36;
+      const speed = 32 + Math.random() * 26;
       const dx = tank.x - target.x;
       const dy = tank.y - target.y;
       const dist = Math.hypot(dx, dy) || 1;
-      target.vx = Math.cos(angle) * speed + (dx / dist) * 22;
-      target.vy = Math.sin(angle) * speed + (dy / dist) * 22;
+      target.vx = Math.cos(angle) * speed + (dx / dist) * 10;
+      target.vy = Math.sin(angle) * speed + (dy / dist) * 10;
     }
     target.x += target.vx * dt;
     target.y += target.vy * dt;
@@ -456,19 +460,19 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     target.y = solved.y;
 
     const dist = Math.hypot(tank.x - target.x, tank.y - target.y);
-    if (dist < 560) {
+    if (warmup <= 0 && dist < 420) {
       target.shoot -= dt;
       if (target.shoot <= 0) {
-        target.shoot = 1.7 + Math.random() * 1.3;
+        target.shoot = 2.6 + Math.random() * 1.8;
         const angle = Math.atan2(tank.x - target.x, -(tank.y - target.y));
-        const speed = 185;
+        const speed = 145;
         shots.push({
           x: target.x + Math.sin(angle) * 28,
           y: target.y - Math.cos(angle) * 28,
           vx: Math.sin(angle) * speed,
           vy: -Math.cos(angle) * speed,
           r: 6,
-          damage: 11,
+          damage: 8,
           life: 2.6,
           friendly: false,
           color: "#ffb703",
@@ -893,20 +897,29 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   retry.addEventListener("click", () => boot());
   window.addEventListener("keydown", onKey);
 
-  window.__TANK_DEBUG__ = () => ({
-    x: tank.x,
-    y: tank.y,
-    angle: tank.angle,
-    turret: tank.turret,
-    hp: tank.hp,
-    fuel: tank.fuel,
-    shots: shots.length,
-    enemies: targets.filter((target) => target.kind === "enemy" && target.alive).length,
-    crates: targets.filter((target) => target.kind === "crate" && target.alive).length,
-    bank,
-    earned,
-    phase,
-  });
+  if (import.meta.env.DEV) {
+    window.__TANK_DEBUG__ = () => ({
+      x: tank.x,
+      y: tank.y,
+      angle: tank.angle,
+      turret: tank.turret,
+      hp: tank.hp,
+      fuel: tank.fuel,
+      shots: shots.length,
+      enemies: targets.filter((target) => target.kind === "enemy" && target.alive).length,
+      crates: targets.filter((target) => target.kind === "crate" && target.alive).length,
+      bank,
+      earned,
+      phase,
+      targets: targets.map((target) => ({
+        x: target.x,
+        y: target.y,
+        kind: target.kind,
+        alive: target.alive,
+        hp: target.hp,
+      })),
+    });
+  }
 
   boot();
   raf = requestAnimationFrame(frame);
@@ -917,7 +930,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     cancelAnimationFrame(raf);
     input.destroy();
     window.removeEventListener("keydown", onKey);
-    if (window.__TANK_DEBUG__) delete window.__TANK_DEBUG__;
+    if (import.meta.env.DEV && window.__TANK_DEBUG__) delete window.__TANK_DEBUG__;
   };
 }
 

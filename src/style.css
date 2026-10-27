@@ -63,7 +63,7 @@ h2 {
   flex-direction: column;
   gap: 16px;
 }
-.menu-screen { width: min(760px, 100%); justify-content: center; }
+.menu-screen { width: min(760px, 100%); justify-content: safe center; }
 .shop-screen { width: min(760px, 100%); }
 
 .topbar {
@@ -320,8 +320,8 @@ h2 {
 .shop-body {
   flex: 1;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: safe center;
+  justify-content: safe center;
 }
 .empty-shop { padding: 28px 22px; text-align: center; max-width: 440px; }
 .empty-shop h2 { margin: 8px 0; letter-spacing: 0; text-transform: none; font-size: 1.6rem; }
