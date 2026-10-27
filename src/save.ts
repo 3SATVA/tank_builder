@@ -1,8 +1,8 @@
 import { cloneGrid, createDefaultGrid, getModule, GRID_COLS, GRID_ROWS } from "./modules";
 import type { SaveData, ShopItem } from "./types";
 
-const KEY = "tank-builder-save-v2";
-const OLD_KEY = "tank-builder-save-v1";
+const KEY = "tank-builder-save-v3";
+const OLD_KEYS = ["tank-builder-save-v2", "tank-builder-save-v1"];
 
 function blank(currency = 0, unlocked: string[] = []): SaveData {
   return {
@@ -38,7 +38,7 @@ function readUnlocked(raw: Partial<SaveData> | null): string[] {
   return raw.unlocked.filter((id): id is string => typeof id === "string" && Boolean(getModule(id)));
 }
 
-/** Old 5×3 saves keep their scrap and unlocks, and get a fresh 7×5 hull. */
+/** Saves from the wide 7×5 or the older 5×3 keep scrap and unlocks, and get a fresh long hull. */
 function sanitize(raw: Partial<SaveData> | null): SaveData {
   const currency = readCurrency(raw);
   const unlocked = readUnlocked(raw);
@@ -52,14 +52,22 @@ function sanitize(raw: Partial<SaveData> | null): SaveData {
 export function loadSave(): SaveData {
   try {
     const current = localStorage.getItem(KEY);
-    if (current) return sanitize(JSON.parse(current) as Partial<SaveData>);
-    const legacy = localStorage.getItem(OLD_KEY);
-    if (!legacy) return blank();
-    const migrated = sanitize(JSON.parse(legacy) as Partial<SaveData>);
-    migrated.grid = createDefaultGrid();
-    localStorage.removeItem(OLD_KEY);
-    saveGame(migrated);
-    return migrated;
+    if (current) {
+      const parsed = JSON.parse(current) as Partial<SaveData>;
+      const save = sanitize(parsed);
+      if (!parsed.grid || !isGrid(parsed.grid) || !fitsCurrentTank(parsed.grid)) saveGame(save);
+      return save;
+    }
+    for (const key of OLD_KEYS) {
+      const legacy = localStorage.getItem(key);
+      if (!legacy) continue;
+      const migrated = sanitize(JSON.parse(legacy) as Partial<SaveData>);
+      migrated.grid = createDefaultGrid();
+      for (const stale of OLD_KEYS) localStorage.removeItem(stale);
+      saveGame(migrated);
+      return migrated;
+    }
+    return blank();
   } catch {
     return blank();
   }

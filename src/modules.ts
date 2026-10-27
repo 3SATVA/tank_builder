@@ -86,8 +86,8 @@ export const BASE_HULL = {
   fuel: 36,
 } as const;
 
-export const GRID_COLS = 7;
-export const GRID_ROWS = 5;
+export const GRID_COLS = 5;
+export const GRID_ROWS = 7;
 export const TURRET_SIZE = 3;
 export const ARMOR_PLATE = 48;
 export const MODULE_PLATE = 32;
@@ -123,17 +123,20 @@ export function cloneGrid(grid: ReadonlyArray<ReadonlyArray<string | null>>): (s
 }
 
 /**
- * 7×5 box. Row 0 is the front. The centered 3×3 (rows 1–3, cols 2–4) is the turret.
- * Two cannons sit on the hull and fire with the hull; two sit on the turret and aim.
+ * 5 wide × 7 long. Row 0 is the front, so the long axis is the direction the hull drives and hull guns fire.
+ * The centered 3×3 (rows 2–4, cols 1–3) is the turret.
+ * Two cannons sit on the front of the hull and fire with the hull; two sit on the turret and aim.
  * Two power cells exactly feed the four cannons.
  */
 export function createDefaultGrid(): (string | null)[][] {
   return [
-    [null, "armor", "cannon", "armor", "cannon", "armor", null],
-    ["tracks", "engine", "cannon", null, "cannon", "engine", "tracks"],
-    [null, "fuel", "armor", "power", "armor", "fuel", null],
-    [null, "fuel", null, "power", null, "fuel", null],
-    ["armor", "tracks", null, "armor", null, "tracks", "armor"],
+    ["armor", "cannon", "armor", "cannon", "armor"],
+    ["tracks", "engine", null, "engine", "tracks"],
+    [null, "cannon", "armor", "cannon", null],
+    ["fuel", null, "power", null, "fuel"],
+    [null, "fuel", "power", "fuel", null],
+    [null, "armor", null, "armor", null],
+    ["armor", "tracks", null, "tracks", "armor"],
   ];
 }
 
