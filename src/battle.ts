@@ -51,6 +51,8 @@ interface Tank {
   fuel: number;
   cooldown: number;
   flash: number;
+  muzzle: number;
+  puff: number;
   grid: (string | null)[][];
   plate: number[][];
   blueprint: (string | null)[][];
@@ -196,6 +198,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   let paid = false;
   let phase: "play" | "win" | "lose" = "play";
   let shake = 0;
+  let simTime = 0;
   let lastStatus = "";
   let raf = 0;
   let lastTime = 0;
@@ -276,6 +279,15 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     tank.y = solved.y;
     if (cmd.aimAngle !== null) tank.turret = rotateToward(tank.turret, cmd.aimAngle, TURRET_TURN * dt);
     tank.flash = Math.max(0, tank.flash - dt);
+    tank.muzzle = Math.max(0, tank.muzzle - dt);
+    const moving = Math.hypot(tank.vx, tank.vy) > 18;
+    if (moving) {
+      tank.puff -= dt;
+      if (tank.puff <= 0) {
+        tank.puff = reduceMotion ? 0.28 : 0.1;
+        emitExhaust(tank);
+      }
+    }
     if (tank.cooldown > 0) tank.cooldown -= dt;
     if (cmd.fire && tank.cooldown <= 0 && stats.fireRate > 0) {
       fireGuns(tank);
@@ -287,7 +299,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     const guns = listGuns(tank.grid);
     for (const gun of guns) {
       const angle = gun.mount === "turret" ? tank.turret : tank.angle;
-      const muzzle = localToWorld(gun.lx, gun.ly - CELL * 0.55, angle);
+      const muzzle = localToWorld(gun.lx, gun.ly - CELL * 0.95, angle);
       const speed = 540;
       shots.push({
         x: tank.x + muzzle.x,
@@ -309,6 +321,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     }
     if (shots.length > 80) shots.splice(0, shots.length - 80);
     tank.flash = 0.06;
+    tank.muzzle = 0.09;
     if (tank.id === "player") sfxShot();
   }
 
@@ -536,9 +549,14 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
           context.fill();
         }
         if (!id || !mod) continue;
-        context.fillStyle = "rgba(255,255,255,0.22)";
-        context.fillRect(x + 3, y + 3, size - 6, 4);
-        drawGlyph(mod.kind, center.x, center.y, size * 0.26);
+        const moving = Math.hypot(tank.vx, tank.vy) > 18;
+        if (mod.kind === "weapon") drawCannon(center.x, center.y, size, tank.muzzle > 0);
+        else if (mod.kind === "engine") drawEngine(center.x, center.y, size, moving, simTime + r * 1.7 + c);
+        else {
+          context.fillStyle = "rgba(255,255,255,0.22)";
+          context.fillRect(x + 3, y + 3, size - 6, 4);
+          drawGlyph(mod.kind, center.x, center.y, size * 0.26);
+        }
         const plateMax = blockPlate(id);
         const left = plateMax > 0 ? tank.plate[r][c] / plateMax : 0;
         if (left < 0.999) {
@@ -581,15 +599,63 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     } else if (kind === "fuel") {
       context.arc(0, 0, s * 0.55, 0, Math.PI * 2);
       context.fill();
-    } else if (kind === "engine") {
-      context.arc(0, 0, s * 0.5, 0, Math.PI * 2);
-      context.stroke();
-    } else {
-      context.moveTo(-s, s * 0.2);
-      context.lineTo(s * 0.15, s * 0.2);
-      context.lineTo(s, -s * 0.15);
+    }
+    context.restore();
+  }
+
+  function drawCannon(x: number, y: number, size: number, flash: boolean): void {
+    const half = size / 2;
+    const width = size * 0.3;
+    const length = size * 1.05;
+    context.save();
+    context.translate(x, y);
+    context.fillStyle = "#d8fff8";
+    context.strokeStyle = "#0e1116";
+    context.lineWidth = 2;
+    traceRoundRect(context, -width / 2, -half - length * 0.62, width, length, 2);
+    context.fill();
+    context.stroke();
+    context.fillStyle = "#12312e";
+    context.fillRect(-width * 0.22, -half - length * 0.62, width * 0.44, 3);
+    context.fillStyle = "rgba(14,17,22,0.35)";
+    context.fillRect(-half * 0.7, half * 0.15, half * 1.4, half * 0.55);
+    if (flash) {
+      context.fillStyle = "rgba(255, 236, 160, 0.95)";
+      context.beginPath();
+      context.arc(0, -half - length * 0.7, size * 0.32, 0, Math.PI * 2);
+      context.fill();
+      context.fillStyle = "#fff7d6";
+      context.beginPath();
+      context.arc(0, -half - length * 0.7, size * 0.14, 0, Math.PI * 2);
+      context.fill();
+    }
+    context.restore();
+  }
+
+  function drawEngine(x: number, y: number, size: number, moving: boolean, phase: number): void {
+    const half = size / 2;
+    context.save();
+    context.translate(x, y);
+    context.fillStyle = "#3a1612";
+    context.strokeStyle = "#0e1116";
+    context.lineWidth = 1.6;
+    for (let i = 0; i < 3; i += 1) {
+      const bob = moving && !reduceMotion ? Math.sin(phase * 22 + i * 1.4) * 1.5 : 0;
+      const px = (i - 1) * size * 0.28;
+      const ph = size * (i === 1 ? 0.34 : 0.42);
+      traceRoundRect(context, px - size * 0.09, -half * 0.15 + bob - ph, size * 0.18, ph, 1.5);
+      context.fill();
       context.stroke();
     }
+    context.strokeStyle = "#1a0c0a";
+    context.lineWidth = 2.4;
+    context.lineCap = "round";
+    context.beginPath();
+    context.moveTo(-size * 0.2, half * 0.15);
+    context.lineTo(-size * 0.2, half + size * 0.28);
+    context.moveTo(size * 0.2, half * 0.35);
+    context.lineTo(size * 0.2, half + size * 0.22);
+    context.stroke();
     context.restore();
   }
 
@@ -678,6 +744,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     }
     const dt = Math.min(0.05, (now - lastTime) / 1000);
     lastTime = now;
+    simTime += dt;
     if (phase === "play") {
       acc += dt;
       const step = 1 / 60;
@@ -770,6 +837,32 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     }
   }
 
+  function emitExhaust(tank: Tank): void {
+    const cols = tank.grid[0]?.length ?? 1;
+    const rows = tank.grid.length;
+    for (let r = 0; r < rows; r += 1) {
+      for (let c = 0; c < cols; c += 1) {
+        const id = tank.grid[r][c];
+        if (!id || getModule(id)?.kind !== "engine") continue;
+        const center = cellCenter(c, r, cols, rows);
+        const angle = isTurretCell(r, c, cols, rows) ? tank.turret : tank.angle;
+        const mouth = localToWorld(center.x, center.y + CELL * 0.78, angle);
+        const rear = localToWorld(0, 1, angle);
+        const speed = 28 + Math.random() * 24;
+        particles.push({
+          x: tank.x + mouth.x,
+          y: tank.y + mouth.y,
+          vx: rear.x * speed + (Math.random() - 0.5) * 14,
+          vy: rear.y * speed + (Math.random() - 0.5) * 14,
+          life: 0.28 + Math.random() * 0.22,
+          max: 0.5,
+          color: Math.random() > 0.45 ? "#d7dbe3" : "#8e969f",
+          size: 3 + Math.random() * 3,
+        });
+      }
+    }
+  }
+
   function burst(x: number, y: number, color: string, count: number): void {
     for (let i = 0; i < count; i += 1) {
       const angle = Math.random() * Math.PI * 2;
@@ -814,6 +907,8 @@ function spawnTank(
     fuel: stats.fuel,
     cooldown: 0.45,
     flash: 0,
+    muzzle: 0,
+    puff: 0,
     grid,
     plate: grid.map((row) => row.map((cell) => (cell ? blockPlate(cell) : 0))),
     blueprint: cloneGrid(blueprint),

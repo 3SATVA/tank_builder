@@ -4,7 +4,7 @@ import { createDefaultGrid, getModule, isCoreCell, isTurretCell, modulesFor, SHO
 import { purchase } from "./save";
 import { sfxTap } from "./sfx";
 import { computeStats } from "./stats";
-import type { SaveData, ShopItem, TankStats } from "./types";
+import type { ModuleDef, SaveData, ShopItem, TankStats } from "./types";
 
 export type ScreenId = "menu" | "garage" | "battle" | "shop";
 
@@ -151,6 +151,8 @@ function buildStage(
       const cell = el("button", mod ? "cell filled" : "cell empty");
       if (turret) cell.classList.add("turret");
       if (isCoreCell(r, c, cols, rows)) cell.classList.add("core");
+      if (mod?.kind === "weapon") cell.classList.add("cannon");
+      if (mod?.kind === "engine") cell.classList.add("engine");
       cell.type = "button";
       cell.style.setProperty("--cell", mod?.color ?? "transparent");
       if (mod && mod.id === selected) cell.classList.add("matches");
@@ -168,11 +170,7 @@ function buildStage(
             : `${mod.name}, ${place}. Tap to replace.`
           : `Empty bay, ${place}. Tap to place.`,
       );
-      if (mod) {
-        const swatch = el("span", "cell-swatch");
-        swatch.innerHTML = iconSvg(mod.kind);
-        cell.append(swatch);
-      }
+      if (mod) cell.append(moduleFace(mod));
       cell.addEventListener("click", () => {
         const current = save.grid[r][c];
         save.grid[r][c] = current === selected ? null : selected;
@@ -199,6 +197,24 @@ function buildStage(
   tools.append(reset);
   stage.append(wrap, tools);
   return stage;
+}
+
+function moduleFace(mod: ModuleDef): HTMLElement {
+  if (mod.kind === "weapon") {
+    const face = el("span", "cannon-face");
+    face.append(el("span", "barrel"), el("span", "breech"));
+    return face;
+  }
+  if (mod.kind === "engine") {
+    const face = el("span", "engine-face");
+    const pots = el("span", "pots");
+    pots.append(el("span", "pot"), el("span", "pot"), el("span", "pot"));
+    face.append(pots, el("span", "pipe left"), el("span", "pipe right"), el("span", "puff"));
+    return face;
+  }
+  const swatch = el("span", "cell-swatch");
+  swatch.innerHTML = iconSvg(mod.kind);
+  return swatch;
 }
 
 function buildSide(

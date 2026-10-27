@@ -31,16 +31,16 @@ Starter blocks, added on top of a bare core (70 core, 28 speed, 18 turning, 36 f
 
 | Block | Effect |
 | --- | --- |
-| Armor | 32 plate on that cell |
+| Armor | 48 plate on that cell |
 | Tracks | +36 turning |
 | Power | +2 power supply |
 | Fuel | +40 fuel |
 | Engine | +44 speed |
 | Cannon | 16 damage, 0.55 shots/s, uses 1 power |
 
-The default 7×5 loadout puts a ring of hull around a centered 3×3 turret: four cannons (two on the hull, two on the turret), eight armor, four tracks, two engines, four fuel, and two power cells. Fire rate is the average of the guns still mounted, scaled by power. It drops when weapon demand is higher than supply, and hits zero with no power. An empty fuel tank crawls at a quarter speed.
+The default hull is 5 blocks wide and 7 long, with the front row at the top. The long axis is forward: that is the way the hull drives and the way hull cannons fire. A centered 3×3 turret carries two of the four cannons; the other two sit on the front of the hull. The rest of the starter loadout is eight armor, four tracks, two engines, four fuel, and two power cells. Fire rate is the average of the guns still mounted, scaled by power. It drops when weapon demand is higher than supply, and hits zero with no power. An empty fuel tank crawls at a quarter speed.
 
-Saves use `tank-builder-save-v2`. An older 5×3 save keeps its scrap and unlocks, and the layout resets to the new hull.
+Saves use `tank-builder-save-v3`. An older wide or 5×3 layout keeps its scrap and unlocks, and the hull resets to the long default.
 
 New block types are another entry in `src/modules.ts`. Shop stock is the `SHOP_ITEMS` list, which is intentionally empty. A rival is `createRivalGrid()` plus a `TankController` in `src/control.ts`.
 
