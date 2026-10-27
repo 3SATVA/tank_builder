@@ -1,10 +1,14 @@
 import { BASE_HULL, getModule } from "./modules";
 import type { TankStats } from "./types";
 
-export function computeStats(grid: ReadonlyArray<ReadonlyArray<string | null>>): TankStats {
+export function computeStats(
+  grid: ReadonlyArray<ReadonlyArray<string | null>>,
+  options?: { repairActive?: boolean },
+): TankStats {
+  const repairActive = options?.repairActive !== false;
   let hp = BASE_HULL.hp;
-  let speed = BASE_HULL.speed;
-  let turn = BASE_HULL.turn;
+  let speed: number = BASE_HULL.speed;
+  let turn: number = BASE_HULL.turn;
   let fuel = BASE_HULL.fuel;
   let power = 0;
   let powerUse = 0;
@@ -13,17 +17,20 @@ export function computeStats(grid: ReadonlyArray<ReadonlyArray<string | null>>):
   let weaponCount = 0;
   let plates = 0;
 
-  for (const row of grid) {
-    for (const id of row) {
-      if (!id) continue;
-      const mod = getModule(id);
+  for (let r = 0; r < grid.length; r += 1) {
+    for (let c = 0; c < grid[r].length; c += 1) {
+      const token = grid[r][c];
+      if (!token) continue;
+      const anchor = token.split("@")[1];
+      if (anchor && anchor !== `${r},${c}`) continue;
+      const mod = getModule(token.split("@")[0] ?? "");
       if (!mod) continue;
       hp += mod.stats.hp ?? 0;
       speed += mod.stats.speed ?? 0;
       turn += mod.stats.turn ?? 0;
       fuel += mod.stats.fuel ?? 0;
       power += mod.stats.power ?? 0;
-      powerUse += mod.stats.powerUse ?? 0;
+      if (!mod.repairs || repairActive) powerUse += mod.stats.powerUse ?? 0;
       if (mod.kind === "armor") plates += 1;
       if (mod.kind === "weapon") {
         weaponCount += 1;
@@ -32,6 +39,8 @@ export function computeStats(grid: ReadonlyArray<ReadonlyArray<string | null>>):
       }
     }
   }
+  speed = Math.max(12, speed);
+  turn = Math.max(10, turn);
 
   const powerFactor = powerUse <= 0 ? 1 : Math.min(1, power / powerUse);
   const averageRate = weaponCount > 0 ? fireRate / weaponCount : 0;

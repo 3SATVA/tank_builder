@@ -1,7 +1,19 @@
 import { el } from "./dom";
+import { canPlace, placeModule, removeInstance } from "./grid";
 import { iconSvg } from "./icons";
-import { createDefaultGrid, getModule, isCoreCell, isTurretCell, modulesFor, SHOP_ITEMS } from "./modules";
-import { purchase } from "./save";
+import {
+  createDefaultGrid,
+  getHull,
+  getModule,
+  hullsFor,
+  isAnchorCell,
+  isCoreCell,
+  isTurretCell,
+  moduleIdOf,
+  modulesFor,
+  SHOP_ITEMS,
+} from "./modules";
+import { activeLayout, purchase } from "./save";
 import { sfxTap } from "./sfx";
 import { computeStats } from "./stats";
 import type { ModuleDef, SaveData, ShopItem, TankStats } from "./types";
@@ -85,8 +97,9 @@ export function renderGarage(
   const paint = (): void => {
     const owned = modulesFor(save.unlocked);
     if (!owned.some((mod) => mod.id === selected)) selected = owned[0]?.id ?? "armor";
-    const stats = computeStats(save.grid);
-    const cols = save.grid[0]?.length ?? 1;
+    const grid = activeLayout(save);
+    const stats = computeStats(grid, { repairActive: true });
+    const cols = grid[0]?.length ?? 1;
 
     const bar = el("header", "topbar");
     const back = el("button", "btn btn-ghost", "Menu");
@@ -126,14 +139,7 @@ function buildStage(
   paint: () => void,
 ): HTMLElement {
   const stage = el("section", "builder");
-  stage.append(
-    el("h2", undefined, "Hull"),
-    el(
-      "p",
-      "hint",
-      "Pick a block, tap a bay to place it. Tap a bay that already holds that block to pull it off. The gold 3×3 is the turret — it rotates toward your aim. Guns on the hull fire the way the hull faces. A shot through a hole in the turret hits the core.",
-    ),
-  );
+  stage.append(el("h2", undefined, "Hull"), hullPicker(save, persist, paint), hint());
 
   const wrap = el("div", "tank-stage");
   wrap.append(el("div", "front-flag", "Front"));
@@ -143,16 +149,21 @@ function buildStage(
   grid.setAttribute("role", "grid");
   grid.setAttribute("aria-label", "Tank hull");
 
-  const rows = save.grid.length;
-  save.grid.forEach((row, r) => {
-    row.forEach((id, c) => {
-      const mod = id ? getModule(id) : undefined;
-      const turret = isTurretCell(r, c, cols, rows);
+  const layout = activeLayout(save);
+  const rows = layout.length;
+  layout.forEach((row, r) => {
+    row.forEach((token, c) => {
+      const mod = getModule(moduleIdOf(token) ?? "");
+      const turret = isTurretCell(r, c, cols, rows, save.hull);
       const cell = el("button", mod ? "cell filled" : "cell empty");
       if (turret) cell.classList.add("turret");
-      if (isCoreCell(r, c, cols, rows)) cell.classList.add("core");
-      if (mod?.kind === "weapon") cell.classList.add("cannon");
+      if (isCoreCell(r, c, cols, rows, save.hull)) cell.classList.add("core");
+      const anchor = isAnchorCell(token, r, c);
+      if (mod?.id === "medium-cannon") cell.classList.add(anchor ? "medium-front" : "medium-rear");
+      else if (mod?.kind === "weapon") cell.classList.add("cannon");
       if (mod?.kind === "engine") cell.classList.add("engine");
+      if (mod?.id === "heavy-armor") cell.classList.add("heavy");
+      if (mod?.id === "repair-bay") cell.classList.add("repair");
       cell.type = "button";
       cell.style.setProperty("--cell", mod?.color ?? "transparent");
       if (mod && mod.id === selected) cell.classList.add("matches");
@@ -167,13 +178,16 @@ function buildStage(
         mod
           ? mod.id === selected
             ? `${mod.name}, ${place}. Tap to remove.`
-            : `${mod.name}, ${place}. Tap to replace.`
+            : `${mod.name}, ${place}.`
           : `Empty bay, ${place}. Tap to place.`,
       );
-      if (mod) cell.append(moduleFace(mod));
+      if (mod) cell.append(moduleFace(mod, mod.id === "medium-cannon" && !anchor ? "rear" : "front"));
       cell.addEventListener("click", () => {
-        const current = save.grid[r][c];
-        save.grid[r][c] = current === selected ? null : selected;
+        const board = activeLayout(save);
+        const currentId = moduleIdOf(board[r][c]);
+        if (currentId === selected) removeInstance(board, r, c);
+        else if (canPlace(board, save.hull, selected, r, c)) placeModule(board, selected, r, c);
+        else return;
         sfxTap();
         persist();
         paint();
@@ -189,7 +203,7 @@ function buildStage(
   const reset = el("button", "btn btn-ghost", "Reset loadout");
   reset.type = "button";
   reset.addEventListener("click", () => {
-    save.grid = createDefaultGrid();
+    save.layouts[save.hull] = createDefaultGrid(save.hull);
     sfxTap();
     persist();
     paint();
@@ -199,7 +213,44 @@ function buildStage(
   return stage;
 }
 
-function moduleFace(mod: ModuleDef): HTMLElement {
+function hint(): HTMLElement {
+  return el(
+    "p",
+    "hint",
+    "Pick a block, tap a bay to place it. Tap a bay that already holds that block to pull it off. A medium cannon fills the bay you tap and the one behind it — both empty, and both on the hull or both inside the turret. The gold 3×3 rotates toward your aim. Guns on the hull fire the way the hull faces. A shot through a hole in the turret hits the core.",
+  );
+}
+
+function hullPicker(save: SaveData, persist: () => void, paint: () => void): HTMLElement {
+  const picker = el("div", "hull-picker");
+  picker.setAttribute("role", "group");
+  picker.setAttribute("aria-label", "Hull");
+  for (const hull of hullsFor(save.unlocked)) {
+    const button = el("button", hull.id === save.hull ? "btn hull-btn selected" : "btn hull-btn", hull.name);
+    button.type = "button";
+    button.dataset.hull = hull.id;
+    button.setAttribute("aria-pressed", hull.id === save.hull ? "true" : "false");
+    button.title = hull.blurb;
+    button.addEventListener("click", () => {
+      if (save.hull === hull.id) return;
+      save.hull = hull.id;
+      if (!save.layouts[hull.id]) save.layouts[hull.id] = createDefaultGrid(hull.id);
+      sfxTap();
+      persist();
+      paint();
+    });
+    picker.append(button);
+  }
+  return picker;
+}
+
+function moduleFace(mod: ModuleDef, end: "front" | "rear" = "front"): HTMLElement {
+  if (mod.id === "medium-cannon") {
+    const face = el("span", end === "rear" ? "cannon-face medium rear" : "cannon-face medium");
+    if (end === "rear") face.append(el("span", "breech"));
+    else face.append(el("span", "barrel"), el("span", "breech"));
+    return face;
+  }
   if (mod.kind === "weapon") {
     const face = el("span", "cannon-face");
     face.append(el("span", "barrel"), el("span", "breech"));
@@ -213,7 +264,7 @@ function moduleFace(mod: ModuleDef): HTMLElement {
     return face;
   }
   const swatch = el("span", "cell-swatch");
-  swatch.innerHTML = iconSvg(mod.kind);
+  swatch.innerHTML = iconSvg(mod.kind, mod.id);
   return swatch;
 }
 
@@ -288,7 +339,7 @@ function palette(
     button.setAttribute("aria-pressed", mod.id === selected ? "true" : "false");
     const swatch = el("span", "swatch");
     swatch.style.background = mod.color;
-    swatch.innerHTML = iconSvg(mod.kind);
+    swatch.innerHTML = iconSvg(mod.kind, mod.id);
     const text = el("span", "palette-copy");
     text.append(el("span", "palette-name", mod.name), el("span", "palette-blurb", mod.blurb));
     button.append(swatch, text);
@@ -304,10 +355,15 @@ function palette(
 
 function composition(save: SaveData): HTMLElement {
   const counts = new Map<string, number>();
-  for (const id of save.grid.flat()) {
-    if (!id) continue;
-    counts.set(id, (counts.get(id) ?? 0) + 1);
-  }
+  const grid = activeLayout(save);
+  grid.forEach((row, r) => {
+    row.forEach((token, c) => {
+      if (!isAnchorCell(token, r, c)) return;
+      const id = moduleIdOf(token);
+      if (!id) return;
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+    });
+  });
   const parts = [...counts.entries()]
     .map(([id, count]) => {
       const mod = getModule(id);
@@ -329,33 +385,12 @@ export function renderShop(save: SaveData, go: (screen: ScreenId) => void, persi
     bar.append(el("span", "brand", "Shop"), scrapPill(save.currency), back);
 
     const body = el("div", "shop-body");
-    if (SHOP_ITEMS.length === 0) {
-      body.append(emptyShop());
-    } else {
-      body.append(shopList(save, persist, paint));
-    }
+    body.append(shopList(save, persist, paint));
     root.replaceChildren(bar, body);
   };
 
   paint();
   return root;
-}
-
-function emptyShop(): HTMLElement {
-  const empty = el("section", "empty-shop");
-  const art = el("div", "empty-art");
-  art.setAttribute("aria-hidden", "true");
-  art.append(el("span", "crate c1"), el("span", "crate c2"), el("span", "crate c3"));
-  empty.append(
-    art,
-    el("h2", undefined, "New modules coming soon"),
-    el(
-      "p",
-      undefined,
-      "Scrap from won duels is banked and ready. The racks are empty until the next shipment of blocks.",
-    ),
-  );
-  return empty;
 }
 
 function shopList(save: SaveData, persist: () => void, paint: () => void): HTMLElement {
@@ -367,12 +402,28 @@ function shopList(save: SaveData, persist: () => void, paint: () => void): HTMLE
 }
 
 function shopCard(save: SaveData, item: ShopItem, persist: () => void, paint: () => void): HTMLElement {
-  const mod = getModule(item.moduleId);
+  const id = item.kind === "module" ? item.moduleId : item.hullId;
+  const owned = save.unlocked.includes(id) || Boolean(item.kind === "hull" && getHull(id)?.starter);
   const card = el("article", "shop-card");
-  const name = mod?.name ?? item.moduleId;
-  const owned = save.unlocked.includes(item.moduleId);
-  card.append(el("h3", undefined, name), el("p", undefined, item.tagline));
-  const button = el("button", "btn btn-primary", owned ? "Owned" : `${item.cost} scrap`);
+  card.dataset.item = id;
+  const head = el("div", "shop-card-top");
+  if (item.kind === "module") {
+    const mod = getModule(id);
+    const swatch = el("span", "swatch");
+    if (mod) {
+      swatch.style.background = mod.color;
+      swatch.innerHTML = iconSvg(mod.kind, mod.id);
+    }
+    head.append(swatch);
+  } else {
+    head.append(el("span", "swatch hull-mark", "Rear"));
+  }
+  const copy = el("div", "shop-copy");
+  copy.append(el("h3", undefined, item.name), el("p", "shop-tagline", item.tagline));
+  head.append(copy);
+  const foot = el("div", "shop-card-foot");
+  foot.append(el("span", "shop-price", `${item.cost.toLocaleString()} scrap`));
+  const button = el("button", "btn btn-primary", owned ? "Owned" : "Buy");
   button.type = "button";
   button.disabled = owned || save.currency < item.cost;
   button.addEventListener("click", () => {
@@ -381,6 +432,7 @@ function shopCard(save: SaveData, item: ShopItem, persist: () => void, paint: ()
     persist();
     paint();
   });
-  card.append(button);
+  foot.append(button);
+  card.append(head, foot);
   return card;
 }

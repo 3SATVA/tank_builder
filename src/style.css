@@ -195,7 +195,7 @@ h2 {
   display: grid;
   grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
   gap: 6px;
-  padding: 22px 10px 16px;
+  padding: 40px 10px 18px;
   overflow: visible;
   background: #2c3548;
   border: 3px solid var(--line);
@@ -237,6 +237,22 @@ h2 {
   pointer-events: none;
 }
 .cell.matches { outline: 3px solid var(--amber); outline-offset: 1px; }
+.cell.heavy {
+  box-shadow: inset 0 0 0 4px #1c2632, inset 0 -8px 0 rgba(0, 0, 0, 0.4);
+}
+.cell.heavy::before {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 3px 3px, #d5dde6 1.7px, #1c242e 2.1px, transparent 2.6px),
+    radial-gradient(circle at calc(100% - 3px) 3px, #d5dde6 1.7px, #1c242e 2.1px, transparent 2.6px),
+    radial-gradient(circle at 3px calc(100% - 3px), #d5dde6 1.7px, #1c242e 2.1px, transparent 2.6px),
+    radial-gradient(circle at calc(100% - 3px) calc(100% - 3px), #d5dde6 1.7px, #1c242e 2.1px, transparent 2.6px);
+}
+.cell.turret.heavy { box-shadow: inset 0 0 0 3px var(--amber), inset 0 0 0 6px #1c2632; }
+.cell.medium-front, .cell.medium-rear { z-index: 2; overflow: visible; }
 .cannon-face, .engine-face {
   position: absolute;
   inset: 0;
@@ -266,6 +282,13 @@ h2 {
   background: rgba(14, 17, 22, 0.35);
   box-shadow: inset 0 3px 0 rgba(255, 255, 255, 0.2);
 }
+.cannon-face.medium .barrel {
+  width: 46%;
+  height: 168%;
+  bottom: 78%;
+  background: linear-gradient(180deg, #f4fffd, #1aa89a 42%, #0c4f4a);
+}
+.cannon-face.medium.rear .breech { height: 52%; top: 18%; bottom: auto; }
 .pots {
   position: absolute;
   left: 12%;
@@ -394,9 +417,15 @@ h2 {
 .shop-body {
   flex: 1;
   display: flex;
-  align-items: safe center;
-  justify-content: safe center;
+  align-items: flex-start;
+  justify-content: center;
+  overflow: auto;
+  width: 100%;
+  padding-bottom: 12px;
 }
+.hull-picker { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.hull-btn { min-height: 42px; padding: 8px 12px; }
+.hull-btn.selected { outline: 3px solid var(--amber); outline-offset: 1px; }
 .empty-shop { padding: 28px 22px; text-align: center; max-width: 440px; }
 .empty-shop h2 { margin: 8px 0; letter-spacing: 0; text-transform: none; font-size: 1.6rem; }
 .empty-art { position: relative; height: 92px; margin-bottom: 4px; }
@@ -412,8 +441,23 @@ h2 {
 .c1 { left: 50%; top: 24px; transform: translateX(-78%) rotate(-8deg); }
 .c2 { left: 50%; top: 10px; transform: translateX(-20%) rotate(6deg); background: #6f93b5; }
 .c3 { left: 50%; top: 30px; transform: translateX(28%) rotate(3deg); background: #4d596c; width: 40px; height: 40px; }
-.shop-list { display: grid; gap: 12px; width: min(520px, 100%); }
-.shop-card { padding: 14px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.shop-list { display: grid; gap: 12px; width: min(560px, 100%); }
+.shop-card { padding: 14px; display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
+.shop-card h3 { margin: 0; letter-spacing: 0; text-transform: none; font-size: 1.15rem; }
+.shop-card-top { display: flex; gap: 12px; align-items: flex-start; }
+.shop-copy { min-width: 0; }
+.shop-tagline { margin: 4px 0 0; }
+.shop-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.shop-price { font-weight: 800; color: var(--amber); font-variant-numeric: tabular-nums; }
+.shop-card-foot .btn { min-width: 96px; }
+.hull-mark {
+  background: #8ea0b5;
+  color: #141820;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
 
 .battle-screen {
   width: 100%;
