@@ -80,6 +80,7 @@ interface Particle {
   max: number;
   color: string;
   size: number;
+  puff?: boolean;
 }
 
 interface Floater {
@@ -453,7 +454,13 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     for (const bit of particles) {
       context.globalAlpha = Math.max(0, bit.life / bit.max);
       context.fillStyle = bit.color;
-      context.fillRect(bit.x, bit.y, bit.size, bit.size);
+      if (bit.puff) {
+        context.beginPath();
+        context.arc(bit.x, bit.y, bit.size, 0, Math.PI * 2);
+        context.fill();
+      } else {
+        context.fillRect(bit.x, bit.y, bit.size, bit.size);
+      }
       context.globalAlpha = 1;
     }
     context.font = "700 16px Trebuchet MS, Verdana, sans-serif";
@@ -846,19 +853,22 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
         if (!id || getModule(id)?.kind !== "engine") continue;
         const center = cellCenter(c, r, cols, rows);
         const angle = isTurretCell(r, c, cols, rows) ? tank.turret : tank.angle;
-        const mouth = localToWorld(center.x, center.y + CELL * 0.78, angle);
         const rear = localToWorld(0, 1, angle);
-        const speed = 28 + Math.random() * 24;
-        particles.push({
-          x: tank.x + mouth.x,
-          y: tank.y + mouth.y,
-          vx: rear.x * speed + (Math.random() - 0.5) * 14,
-          vy: rear.y * speed + (Math.random() - 0.5) * 14,
-          life: 0.28 + Math.random() * 0.22,
-          max: 0.5,
-          color: Math.random() > 0.45 ? "#d7dbe3" : "#8e969f",
-          size: 3 + Math.random() * 3,
-        });
+        for (let n = 0; n < 2; n += 1) {
+          const mouth = localToWorld(center.x + (n === 0 ? -4 : 4), center.y + CELL * 0.82, angle);
+          const speed = 22 + Math.random() * 20;
+          particles.push({
+            x: tank.x + mouth.x,
+            y: tank.y + mouth.y,
+            vx: rear.x * speed + (Math.random() - 0.5) * 12,
+            vy: rear.y * speed + (Math.random() - 0.5) * 12,
+            life: 0.45 + Math.random() * 0.25,
+            max: 0.7,
+            color: n === 0 ? "#c5ccd6" : "#6e7782",
+            size: 4 + Math.random() * 3.5,
+            puff: true,
+          });
+        }
       }
     }
   }
