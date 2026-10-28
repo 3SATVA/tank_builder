@@ -35,10 +35,10 @@ const SHIELD_DELAY = 3.5;
 const SHIELD_REGEN = 24;
 const DRONE_HP = 34;
 const DRONE_PERIOD = 8;
-const DRONE_FIRST = 1.15;
+const DRONE_FIRST = 0.7;
 const DRONE_DAMAGE = 8;
-const DRONE_LIFE = 1.05;
-const DRONE_SPEED = 168;
+const DRONE_LIFE = 1.45;
+const DRONE_SPEED = 188;
 /** Authored module sprites are CELL_ART pixels. On screen each of those maps to an integer run of device pixels. */
 
 interface Sprite {
@@ -179,6 +179,9 @@ interface TankDebug {
   shield: number;
   shieldMax: number;
   drones: number;
+  droneX: number;
+  droneY: number;
+  droneAngle: number;
   hull: string;
 }
 
@@ -1143,36 +1146,43 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   function drawSmoothDrone(drone: Drone): void {
     if (drone.hp <= 0) return;
     pen.save();
-    pen.translate(drone.x + 2, drone.y + 3);
+    pen.translate(drone.x + 3, drone.y + 4);
     pen.rotate(drone.angle);
-    pen.fillStyle = "rgba(0,0,0,0.28)";
+    pen.fillStyle = "rgba(0,0,0,0.3)";
     pen.beginPath();
-    pen.ellipse(0, 0, 16, 20, 0, 0, Math.PI * 2);
+    pen.ellipse(0, 0, 22, 28, 0, 0, Math.PI * 2);
     pen.fill();
     pen.restore();
     pen.save();
-    pen.globalAlpha = drone.flash > 0 ? 0.7 : 1;
+    pen.globalAlpha = drone.flash > 0 ? 0.72 : 1;
     pen.translate(drone.x, drone.y);
     pen.rotate(drone.angle);
-    pen.fillStyle = drone.owner === "player" ? "#1c6e66" : "#8a3a28";
-    pen.strokeStyle = "#0e1116";
     pen.lineWidth = 2;
-    traceRoundRect(pen, -13, -16, 26, 32, 4);
+    pen.strokeStyle = "#0e1116";
+    pen.fillStyle = "#141820";
+    pen.fillRect(-22, -18, 6, 36);
+    pen.fillRect(16, -18, 6, 36);
+    pen.fillStyle = drone.owner === "player" ? "#1c6e66" : "#8a3a28";
+    traceRoundRect(pen, -16, -22, 32, 44, 5);
     pen.fill();
     pen.stroke();
-    pen.fillStyle = "#141820";
-    pen.fillRect(-16, -12, 4, 24);
-    pen.fillRect(12, -12, 4, 24);
-    pen.fillStyle = "#d8fff8";
-    traceRoundRect(pen, -3.5, -30, 7, 16, 2);
+    pen.fillStyle = drone.owner === "player" ? "#d8fff8" : "#ffd0b0";
+    traceRoundRect(pen, -5, -46, 10, 26, 2);
     pen.fill();
     pen.stroke();
     pen.fillStyle = "#241c10";
-    pen.fillRect(-6, -32, 12, 4);
+    pen.fillRect(-8, -48, 16, 5);
+    pen.fillStyle = "#ffb703";
+    pen.beginPath();
+    pen.moveTo(0, -24);
+    pen.lineTo(7, -14);
+    pen.lineTo(-7, -14);
+    pen.closePath();
+    pen.fill();
     if (drone.muzzle > 0) {
       pen.fillStyle = "rgba(255, 236, 160, 0.95)";
       pen.beginPath();
-      pen.arc(0, -34, 5, 0, Math.PI * 2);
+      pen.arc(0, -50, 8, 0, Math.PI * 2);
       pen.fill();
     }
     pen.restore();
@@ -1656,6 +1666,9 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       shield: player.shield,
       shieldMax: player.shieldMax,
       drones: drones.filter((drone) => drone.owner === "player" && drone.hp > 0).length,
+      droneX: drones.find((drone) => drone.owner === "player" && drone.hp > 0)?.x ?? 0,
+      droneY: drones.find((drone) => drone.owner === "player" && drone.hp > 0)?.y ?? 0,
+      droneAngle: drones.find((drone) => drone.owner === "player" && drone.hp > 0)?.angle ?? 0,
       hull: player.hull,
     });
   }
@@ -1802,9 +1815,9 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
 
   function spawnDrone(tank: Tank, bay: string): void {
     const side = drones.filter((drone) => drone.owner === tank.id).length % 2 === 0 ? 1 : -1;
-    const ang = tank.angle + side * 0.95;
-    const dist = tank.radius + 32;
-    const spot = resolveTank(map, tank.x + Math.sin(ang) * dist, tank.y - Math.cos(ang) * dist, 16);
+    const ang = tank.angle + side * 0.4;
+    const dist = tank.radius + 40;
+    const spot = resolveTank(map, tank.x + Math.sin(ang) * dist, tank.y - Math.cos(ang) * dist, 22);
     drones.push({
       owner: tank.id,
       bay,
@@ -1813,8 +1826,8 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       angle: tank.angle,
       hp: DRONE_HP,
       hpMax: DRONE_HP,
-      cooldown: 0.35,
-      radius: 16,
+      cooldown: 0.2,
+      radius: 22,
       flash: 0,
       muzzle: 0,
     });
@@ -1831,26 +1844,38 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       const foe = drone.owner === "player" ? rival : player;
       const aim = Math.atan2(foe.x - drone.x, -(foe.y - drone.y));
       const dist = Math.hypot(foe.x - drone.x, foe.y - drone.y);
-      let desired = dist < 110 ? aim + 1.15 : aim;
-      const look = 42;
-      const aheadX = drone.x + Math.sin(drone.angle) * look;
-      const aheadY = drone.y - Math.cos(drone.angle) * look;
-      const blocked =
-        aheadX < drone.radius ||
-        aheadY < drone.radius ||
-        aheadX > map.w - drone.radius ||
-        aheadY > map.h - drone.radius ||
-        hitsBlock(map, aheadX, aheadY, drone.radius);
-      if (blocked) {
-        const left = drone.angle - 1.05;
-        const right = drone.angle + 1.05;
-        const leftHit = hitsBlock(map, drone.x + Math.sin(left) * look, drone.y - Math.cos(left) * look, drone.radius);
-        const rightHit = hitsBlock(map, drone.x + Math.sin(right) * look, drone.y - Math.cos(right) * look, drone.radius);
-        if (!leftHit && rightHit) desired = left;
-        else if (leftHit && !rightHit) desired = right;
-        else desired = drone.angle + 1.25;
+      const probe = (angle: number, distance: number): boolean => {
+        const x = drone.x + Math.sin(angle) * distance;
+        const y = drone.y - Math.cos(angle) * distance;
+        return (
+          x < drone.radius ||
+          y < drone.radius ||
+          x > map.w - drone.radius ||
+          y > map.h - drone.radius ||
+          hitsBlock(map, x, y, drone.radius)
+        );
+      };
+      let desired = aim;
+      let bestScore = Number.NEGATIVE_INFINITY;
+      for (let step = 0; step < 20; step += 1) {
+        const turn = step === 0 ? 0 : (step % 2 === 0 ? 1 : -1) * Math.ceil(step / 2) * 0.34;
+        const angle = aim + turn;
+        let run = 0;
+        for (const reach of [32, 70, 120, 180, 260]) {
+          if (probe(angle, reach)) break;
+          run = reach;
+        }
+        if (run === 0) continue;
+        const nx = drone.x + Math.sin(angle) * run;
+        const ny = drone.y - Math.cos(angle) * run;
+        const closer = dist - Math.hypot(foe.x - nx, foe.y - ny);
+        const score = run * 1.6 + closer * 0.35 - Math.abs(turn) * 8;
+        if (score > bestScore) {
+          bestScore = score;
+          desired = angle;
+        }
       }
-      drone.angle = rotateToward(drone.angle, desired, 4.8 * dt);
+      drone.angle = rotateToward(drone.angle, desired, 5.4 * dt);
       drone.x += Math.sin(drone.angle) * DRONE_SPEED * dt;
       drone.y -= Math.cos(drone.angle) * DRONE_SPEED * dt;
       nudgeApart(drone, parent, 6);
@@ -1869,20 +1894,20 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       drone.cooldown -= dt;
       drone.flash = Math.max(0, drone.flash - dt);
       drone.muzzle = Math.max(0, drone.muzzle - dt);
-      if (dist < 560 && Math.abs(angleDelta(drone.angle, aim)) < 0.45 && drone.cooldown <= 0) {
-        const speed = 430;
+      if (dist < 780 && Math.abs(angleDelta(drone.angle, aim)) < 0.7 && drone.cooldown <= 0 && !probe(aim, 36)) {
+        const speed = 460;
         shots.push({
-          x: drone.x + Math.sin(drone.angle) * 22,
-          y: drone.y - Math.cos(drone.angle) * 22,
+          x: drone.x + Math.sin(drone.angle) * 30,
+          y: drone.y - Math.cos(drone.angle) * 30,
           vx: Math.sin(drone.angle) * speed,
           vy: -Math.cos(drone.angle) * speed,
-          r: 3.6,
+          r: 5.4,
           damage: DRONE_DAMAGE,
           life: DRONE_LIFE,
           owner: drone.owner,
           color: drone.owner === "player" ? PAL.cyan : PAL.orange,
         });
-        drone.cooldown = 0.72;
+        drone.cooldown = 0.55;
         drone.muzzle = 0.08;
       }
       if (drone.hp <= 0) drones.splice(i, 1);
@@ -1941,7 +1966,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     if (drone.hp <= 0) return;
     const at = worldToArt(drone.x, drone.y, view);
     const src = droneArt(drone.owner, drone.muzzle > 0);
-    const h = Math.max(12, Math.round(view.cellPx * 1.45));
+    const h = Math.max(18, Math.round(view.cellPx * 2.7));
     const w = Math.max(8, Math.round((h * src.width) / src.height));
     const scaled = nearestScale(src, w, h, `drone-${drone.owner}-${w}x${h}-${drone.muzzle > 0}`);
     context.save();
