@@ -764,6 +764,19 @@ body.in-battle .tab-bar { display: none; }
 .bot-card { padding: 14px; display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
 .bot-card h3 { margin: 0; letter-spacing: 0; text-transform: none; font-size: 1.25rem; }
 .bot-card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.bot-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.boss-tag {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #1a0a0c;
+  background: #ff3048;
+  border: 2px solid #0e1116;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.bot-card.boss { outline: 3px solid #ff3048; outline-offset: 1px; }
 .bot-reward { font-weight: 800; color: var(--amber); }
 .bot-card.locked { opacity: 0.72; }
 .bot-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -1082,7 +1095,7 @@ html[data-art="pixel"] .tab-icon {
   line-height: 1;
 }
 html[data-art="pixel"] .tab-label { font-size: 7px; letter-spacing: 0; }
-html[data-art="pixel"] .battle-go { font-size: 11px; }
+html[data-art="pixel"] .boss-tag { border-radius: 0; font-size: 7px; padding: 3px 4px; }
 html[data-art="pixel"] .no-power::after { transform: none; }
 html[data-art="pixel"] .joystick-base {
   background: #1c1a28;

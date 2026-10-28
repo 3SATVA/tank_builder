@@ -1,6 +1,6 @@
 import { mountBattle } from "./battle";
 import { applyArtStyle } from "./config";
-import { getBot } from "./bots";
+import { ACE_TUNING, getBot } from "./bots";
 import { outfitProblem } from "./modules";
 import { PVP_SCRAP, ratingLine, reportResult, scheduleDefense, standInGrid, veteranTuning, type PvpLaunch } from "./pvp";
 import { activeLayout, loadSave, saveGame } from "./save";
@@ -131,6 +131,7 @@ function show(screen: ScreenId, botId?: string): void {
     rivalHull: bot.hull,
     rivalGrid: bot.grid.map((row) => row.slice()),
     rivalTuning: bot.tuning,
+    driver: new URLSearchParams(location.search).get("sim") ? ACE_TUNING : undefined,
     scrap: bot.scrap,
     currency: save.currency,
     onCurrency: (value) => {

@@ -44,6 +44,10 @@ export interface ModuleDef {
   hook?: boolean;
   /** Damages enemy blocks that touch this cell. Does not fire a shot. */
   cutter?: boolean;
+  /** Campaign bosses only. Never sold, never placed, and stripped from PvP layouts. */
+  boss?: boolean;
+  /** Shield HP from this generator. Defaults to the standard bubble. */
+  shieldHp?: number;
 }
 
 export type ShopItem =

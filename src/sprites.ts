@@ -485,6 +485,114 @@ const CUTTER = [
   "...KKKK...",
 ];
 
+const BOSS_ARMOR = [
+  "KKKKKKKKKK",
+  "KRRRRRRRRK",
+  "KRKRRRRKRK",
+  "KRRRRRRRRK",
+  "KRRKRRKRRK",
+  "KRRRRRRRRK",
+  "KRKRRRRKRK",
+  "KRRRRRRRRK",
+  "KRRRRRRRRK",
+  "KKKKKKKKKK",
+];
+
+const REACTOR = [
+  "KKKKKKKKKK",
+  "KRRRRRRRRK",
+  "KRKKKKKKRK",
+  "KRKRRRRKRK",
+  "KRKRLLRKRK",
+  "KRKRRRRKRK",
+  "KRKKKKKKRK",
+  "KRRRRRRRRK",
+  "KLLLLLLLLK",
+  "KKKKKKKKKK",
+];
+
+const SUPER = [
+  "KKKKKKKKKK",
+  "KRRRRRRRRK",
+  "KRLLLLLLRK",
+  "KRLKKKKLRK",
+  "KRLKRRKLRK",
+  "KRLKRRKLRK",
+  "KRLKKKKLRK",
+  "KRLLLLLLRK",
+  "KRRRRRRRRK",
+  "KKKKKKKKKK",
+];
+
+const MEGA_REAR = [
+  "KKKKKKKKKK",
+  "KRRRRRRRRK",
+  "KRKKLLKKRK",
+  "KRRRRRRRRK",
+  "KRKKLLKKRK",
+  "KRRRRRRRRK",
+  "KRKKLLKKRK",
+  "KRRRRRRRRK",
+  "KLLLLLLLLK",
+  "KKKKKKKKKK",
+];
+
+const MEGA_MID = [
+  "KKKKKKKKKK",
+  "KRRRRRRRRK",
+  "KRLLLLLLRK",
+  "KRLLKKLLRK",
+  "KRLLLLLLRK",
+  "KRLLKKLLRK",
+  "KRLLLLLLRK",
+  "KRRRRRRRRK",
+  "KLLLLLLLLK",
+  "KKKKKKKKKK",
+];
+
+const MEGA_FRONT = [
+  "..KKLLKK..",
+  "..KLLLLK..",
+  "..KKLLKK..",
+  "..KLLLLK..",
+  "..KKLLKK..",
+  ".KKLLLLKK.",
+  ".KLLLLLLK.",
+  "KKLLLLLLKK",
+  "KRRRRRRRRK",
+  "KRLLLLLLRK",
+  "KRRRRRRRRK",
+  "KRLLLLLLRK",
+  "KRRRRRRRRK",
+  "KKKKKKKKKK",
+];
+
+const GRAPPLE_REAR = [
+  "KKKKKKKKKK",
+  "KRRRRRRRRK",
+  "KRKKLLKKRK",
+  "KRRRRRRRRK",
+  "KRLLLLLLRK",
+  "KRLLKKLLRK",
+  "KRLLLLLLRK",
+  "KRRRRRRRRK",
+  "KLLLLLLLLK",
+  "KKKKKKKKKK",
+];
+
+const GRAPPLE_FRONT = [
+  "....KK....",
+  "...KLLK...",
+  "....LL....",
+  "...LLLL...",
+  "..LLLLLL..",
+  ".KKLLLLKK.",
+  "KRRRRRRRRK",
+  "KRLLLLLLRK",
+  "KRRRRRRRRK",
+  "KKKKKKKKKK",
+];
+
 export function moduleArt(id: string, opts: SpriteOpts = {}): HTMLCanvasElement {
   if (id === "heavy-armor") return bake(HEAVY, "heavy");
   if (id === "repair-bay") return bake(REPAIR, "repair");
@@ -504,6 +612,18 @@ export function moduleArt(id: string, opts: SpriteOpts = {}): HTMLCanvasElement 
     return bake(opts.flash ? HARPOON_FLASH : HARPOON, opts.flash ? "harp-flash" : "harp");
   }
   if (id === "cutter") return bake(CUTTER, "cutter");
+  if (id === "boss-armor") return bake(BOSS_ARMOR, "boss-armor");
+  if (id === "reactor") return bake(REACTOR, "reactor");
+  if (id === "super-shield") return bake(SUPER, `super-${opts.quad ?? 0}`);
+  if (id === "mega-cannon") {
+    if (opts.rear) return bake(MEGA_REAR, "mega-rear");
+    if (opts.mid) return bake(MEGA_MID, "mega-mid");
+    return bake(MEGA_FRONT, "mega");
+  }
+  if (id === "boss-grapple") {
+    if (opts.rear) return bake(GRAPPLE_REAR, "grapple-rear");
+    return bake(GRAPPLE_FRONT, "grapple");
+  }
   if (id === "cannon") return bake(opts.flash ? CANNON_FLASH : CANNON, opts.flash ? "can-flash" : "can");
   if (id === "engine") return bake(opts.puff ? ENGINE_PUFF : ENGINE, opts.puff ? "eng-puff" : "eng");
   if (id === "fuel") return bake(FUEL, "fuel");
