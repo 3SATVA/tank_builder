@@ -48,7 +48,7 @@ Hitting either cell of a medium cannon damages that one gun. It pops off as a si
 
 Rookie fields two cannons and a light hull, and aims loosely. Veteran adds a heavy plate, four cannons, and a repair bay, and starts to strafe and lead. Warlord rides the rear-turret hull with heavy cheeks, a medium cannon, and a repair bay, and leads, dodges, and holds range. Progress is `botsBeaten` in the save: 0 opens only Rookie, and each win unlocks the next name.
 
-Arenas live in `src/maps.ts`. The long side is about eight tank-lengths. Spawns sit on opposite sides, clear of cover, with a drivable path between them. The picture is pixel art: a low internal resolution scaled up with nearest-neighbor, and the Press Start 2P font hosted in `public/fonts`.
+Arenas live in `src/maps.ts`. The long side is about eight tank-lengths. Spawns sit on opposite sides, clear of cover, with a drivable path between them. The default look is smooth. Set `DEFAULT_ART_STYLE` in `src/config.ts` to `"pixel"` to ship the pixel-art sprites and Press Start 2P font instead. The garage toggle stores a choice in `localStorage` under `tank-builder-art-style` and overrides that default.
 
 Saves use `tank-builder-save-v4`, with one layout per hull. An older long-hull save keeps its scrap, unlocks, and 5×7 layout on the standard hull. A wide or 5×3 save keeps scrap and unlocks and gets a fresh standard hull. A save that has no rival progress starts at Rookie.
 

@@ -1,6 +1,8 @@
 import { BOTS, botOpen } from "./bots";
 import { el } from "./dom";
 import { commitPlacement } from "./grid";
+import { applyArtStyle, readArtStyle, writeArtStyle, type ArtStyle } from "./config";
+import { iconSvg } from "./icons";
 import { mountSprite } from "./sprites";
 import {
   createDefaultGrid,
@@ -140,7 +142,7 @@ function buildStage(
   paint: () => void,
 ): HTMLElement {
   const stage = el("section", "builder");
-  stage.append(el("h2", undefined, "Hull"), hullPicker(save, persist, paint), hint());
+  stage.append(el("h2", undefined, "Hull"), hullPicker(save, persist, paint), artStyleToggle(paint), hint());
 
   const wrap = el("div", "tank-stage");
   wrap.append(el("div", "front-flag", "Front"));
@@ -243,7 +245,51 @@ function hullPicker(save: SaveData, persist: () => void, paint: () => void): HTM
 }
 
 function moduleFace(mod: ModuleDef, end: "front" | "rear" = "front"): HTMLElement {
-  return mountSprite(mod.id, 5, { rear: mod.id === "medium-cannon" && end === "rear" });
+  if (readArtStyle() === "pixel") {
+    return mountSprite(mod.id, 5, { rear: mod.id === "medium-cannon" && end === "rear" });
+  }
+  if (mod.id === "medium-cannon") {
+    const face = el("span", end === "rear" ? "cannon-face medium rear" : "cannon-face medium");
+    if (end === "rear") face.append(el("span", "breech"));
+    else face.append(el("span", "barrel"), el("span", "breech"));
+    return face;
+  }
+  if (mod.kind === "weapon") {
+    const face = el("span", "cannon-face");
+    face.append(el("span", "barrel"), el("span", "breech"));
+    return face;
+  }
+  if (mod.kind === "engine") {
+    const face = el("span", "engine-face");
+    const pots = el("span", "pots");
+    pots.append(el("span", "pot"), el("span", "pot"), el("span", "pot"));
+    face.append(pots, el("span", "pipe left"), el("span", "pipe right"), el("span", "puff"));
+    return face;
+  }
+  const swatch = el("span", "cell-swatch");
+  swatch.innerHTML = iconSvg(mod.kind, mod.id);
+  return swatch;
+}
+
+function artStyleToggle(repaint: () => void): HTMLElement {
+  const row = el("div", "art-toggle");
+  row.append(el("span", "art-label", "Art style"));
+  const current = readArtStyle();
+  for (const style of ["smooth", "pixel"] as const) {
+    const button = el("button", style === current ? "btn art-style selected" : "btn art-style", style === "smooth" ? "Smooth" : "Pixel");
+    button.type = "button";
+    button.dataset.art = style;
+    button.setAttribute("aria-pressed", style === current ? "true" : "false");
+    button.addEventListener("click", () => {
+      if (readArtStyle() === style) return;
+      writeArtStyle(style as ArtStyle);
+      applyArtStyle();
+      sfxTap();
+      repaint();
+    });
+    row.append(button);
+  }
+  return row;
 }
 
 function buildSide(
@@ -317,7 +363,8 @@ function palette(
     button.setAttribute("aria-pressed", mod.id === selected ? "true" : "false");
     const swatch = el("span", "swatch");
     swatch.style.background = mod.color;
-    swatch.append(mountSprite(mod.id, 4, {}, true));
+    if (readArtStyle() === "pixel") swatch.append(mountSprite(mod.id, 4, {}, true));
+    else swatch.innerHTML = iconSvg(mod.kind, mod.id);
     const text = el("span", "palette-copy");
     text.append(el("span", "palette-name", mod.name), el("span", "palette-blurb", mod.blurb));
     button.append(swatch, text);
@@ -438,7 +485,8 @@ function shopCard(save: SaveData, item: ShopItem, persist: () => void, paint: ()
     const swatch = el("span", "swatch");
     if (mod) {
       swatch.style.background = mod.color;
-      swatch.append(mountSprite(mod.id, 4, {}, true));
+      if (readArtStyle() === "pixel") swatch.append(mountSprite(mod.id, 4, {}, true));
+      else swatch.innerHTML = iconSvg(mod.kind, mod.id);
     }
     head.append(swatch);
   } else {
