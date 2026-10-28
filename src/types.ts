@@ -40,6 +40,10 @@ export interface ModuleDef {
   drone?: boolean;
   /** Adds a rechargeable shield bubble. Extra copies stack. */
   generator?: boolean;
+  /** Fires a spear that pulls the target closer for a moment. */
+  hook?: boolean;
+  /** Damages enemy blocks that touch this cell. Does not fire a shot. */
+  cutter?: boolean;
 }
 
 export type ShopItem =

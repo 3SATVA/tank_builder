@@ -15,6 +15,7 @@ export function computeStats(
   let damageSum = 0;
   let fireRate = 0;
   let weaponCount = 0;
+  let shooters = 0;
   let plates = 0;
 
   for (let r = 0; r < grid.length; r += 1) {
@@ -34,8 +35,11 @@ export function computeStats(
       if (mod.kind === "armor") plates += 1;
       if (mod.kind === "weapon") {
         weaponCount += 1;
-        damageSum += mod.stats.damage ?? 0;
-        fireRate += mod.stats.fireRate ?? 0;
+        if (!mod.cutter) {
+          shooters += 1;
+          damageSum += mod.stats.damage ?? 0;
+          fireRate += mod.stats.fireRate ?? 0;
+        }
       }
     }
   }
@@ -43,8 +47,8 @@ export function computeStats(
   turn = Math.max(10, turn);
 
   const powerFactor = powerUse <= 0 ? 1 : Math.min(1, power / powerUse);
-  const averageRate = weaponCount > 0 ? fireRate / weaponCount : 0;
-  const canFire = weaponCount > 0 && powerFactor > 0 && averageRate > 0;
+  const averageRate = shooters > 0 ? fireRate / shooters : 0;
+  const canFire = shooters > 0 && powerFactor > 0 && averageRate > 0;
 
   return {
     hp,

@@ -10,8 +10,8 @@ npm run build
 
 ## Screens
 
-- **Garage** — tap a block in the palette, tap a bay to place it. Tap the same block to pull it off, or a different one to replace it. A long gun takes the bay you tap and the cells behind it. A 2×2 part takes a square. It replaces whatever was in those cells as long as every cell is on the hull or every cell is inside the turret, and a multi-cell part does not cover the core. The top row is the front of the hull. The gold 3×3 is the turret, on hulls that have one; those bays are module slots too. A hull switcher lists the chassis you own, and each hull keeps its own layout.
-- **Battle** — pick Rookie, Veteran, or Warlord, then duel. Beating a rival opens the next one. Each fight rolls an arena: Default, Plains, Fortress, Graveyard, Town, Volcano, or Junkyard. The long side is about eight tank-lengths. The name shows at the start. The camera follows your tank and turns with it, so the hull always points up the screen and you see more of the field ahead. On a phone the hull is about 105 CSS pixels tall. An arrow points at a rival who is off screen. Cover stops shots and tanks. Lava on Volcano burns the core of a tank that drives through it. A rematch keeps the same field. Each bot uses the same drive commands a remote player would send later, paths around cover, and fires only with a clear shot.
+- **Garage** — tap a block in the palette, tap a bay to place it. Tap the same block to pull it off, or a different one to replace it. A long gun takes the bay you tap and the cells behind it. A 2×2 part takes a square. It replaces whatever was in those cells as long as every cell is on the hull or every cell is inside the turret. The top row is the front of the hull. The gold 3×3 is the turret, on hulls that have one; those bays are module slots too. A hull switcher lists the chassis you own, and each hull keeps its own layout.
+- **Battle** — pick Rookie, Veteran, or Warlord, then duel. Beating a rival opens the next one. Each fight rolls an arena: Default, Plains, Fortress, Graveyard, Town, Volcano, or Junkyard. The long side is about eight tank-lengths. The name shows at the start. The camera follows your tank and turns with it, so the hull always points up the screen and you see more of the field ahead. On a phone the hull is about 105 CSS pixels tall. An arrow points at a rival who is off screen. Cover stops shots and tanks. Lava on Volcano burns the blocks touching it. Tanks push each other aside and cannot overlap. A rematch keeps the same field. Each bot uses the same drive commands a remote player would send later, paths around cover, and fires only with a clear shot.
 - **Shop** — spend scrap from won duels. Each card shows the name, what the part does, its tradeoff, the price, and a Buy button. Bought blocks join the garage palette. The bought hull joins the switcher.
 
 ## Controls
@@ -27,7 +27,7 @@ Right stick rotates the 3×3 turret toward that direction and fires every powere
 
 ## Modules
 
-Starter blocks, added on top of a bare core (70 core, 28 speed, 18 turning, 36 fuel). Armor does not add core HP. Each armor block soaks 48 damage on its own cell; every other block soaks 32. Overflow past a broken plate comes off the core. A shot that lands in an empty turret bay also hits the core, so opening a hole in the gold 3×3 is how you finish a tank. On the gun deck the same rule applies to the single core cell, since that hull has no turret. The tank is out when the core hits zero or every block is gone. Lost blocks change speed, turning, fuel, power, and guns immediately.
+Starter blocks sit on a bare hull (28 speed, 18 turning, 36 fuel). Each armor block soaks 48 damage on its own cell; every other block soaks 32. A shot hurts the block it hits. The tank is destroyed when every weapon is gone, or every power block is gone. Lost blocks change speed, turning, fuel, power, and guns immediately. A fight needs at least one weapon and one power block.
 
 | Block | Effect |
 | --- | --- |
@@ -38,7 +38,9 @@ Starter blocks, added on top of a bare core (70 core, 28 speed, 18 turning, 36 f
 | Engine | +44 speed |
 | Cannon | 16 damage, 0.55 shots/s, uses 1 power |
 | Heavy armor | 96 plate, −30 speed, −12 turning. Shop, 150 scrap |
-| Repair bay | Restores the most hurt block, or rebuilds a destroyed one, every few seconds. Never the core. Draws 2 power while it is working. Shop, 200 scrap |
+| Repair bay | Restores the most hurt block, or rebuilds a destroyed one, every few seconds. Draws 2 power while it is working. Shop, 200 scrap |
+| Harpoon | 2 cells along the mount. 18 damage, short range, slow reload, pulls the enemy in on a hit. Uses 3 power. Shop |
+| Cutter | Saws enemy blocks and drones that touch it. Uses 1 power. Shop |
 | Medium cannon | 2 cells along the hull (this bay and the one behind it). 28 damage, longer range, 0.30 shots/s, uses 4 power. Both cells must be hull, or both inside the turret. Shop, 250 scrap |
 | Heavy cannon | 3 cells in a line. 46 damage, longer range than the medium, 0.16 shots/s, uses 8 power. All three cells on the hull or all three in the turret. Shop |
 | Robot bay | 2×2. Launches one drone that drives, avoids cover, and shoots the enemy. One drone per bay. The rival can destroy it. Uses 3 power. Shop |
@@ -48,7 +50,7 @@ Starter blocks, added on top of a bare core (70 core, 28 speed, 18 turning, 36 f
 
 The four newest shop entries (heavy cannon, robot bay, gun deck, shield generator) share `NEW_SHOP_COST` in `src/modules.ts`. It is 50 scrap while they are being tested. Change that one number to reprice all four.
 
-The default hull is 5 blocks wide and 7 long, with the front row at the top. The long axis is forward: that is the way the hull drives and the way hull cannons fire. A centered 3×3 turret carries two of the four cannons; the other two sit on the front of the hull. The rear-turret hull keeps the same footprint and moves the gold 3×3 to rows 5–7. Bought hulls, including the rear turret and the gun deck, start with empty bays, and Reset clears them back to empty. The starter loadout is eight armor, four tracks, two engines, four fuel, and two power cells. A fight needs at least one block; an empty hull stays in the garage with a note instead of starting. Fire rate is the average of the guns still mounted, scaled by power. It drops when weapon demand is higher than supply, and hits zero with no power. An empty fuel tank crawls at a quarter speed. A repair bay spends power only while a block is hurt or missing.
+The default hull is 5 blocks wide and 7 long, with the front row at the top. The long axis is forward: that is the way the hull drives and the way hull cannons fire. A centered 3×3 turret carries two of the four cannons; the other two sit on the front of the hull. The rear-turret hull keeps the same footprint and moves the gold 3×3 to rows 5–7. Bought hulls, including the rear turret and the gun deck, start with empty bays, and Reset clears them back to empty. The starter loadout is eight armor, four tracks, two engines, four fuel, and two power cells. A fight needs at least one weapon and one power block; otherwise the garage keeps you there with a note. Fire rate is the average of the guns still mounted, scaled by power. It drops when weapon demand is higher than supply, and hits zero with no power. An empty fuel tank crawls at a quarter speed. A repair bay spends power only while a block is hurt or missing.
 
 Hitting any cell of a multi-cell part damages that one part. It pops off as a single piece and frees every bay it occupied. Heavy armor is slower. Module blocks are square; barrels, engines, bays, and rivets keep their own shapes. A shield bubble soaks a hit before the module under it does. A robot bay keeps at most one drone in the air.
 
