@@ -97,7 +97,7 @@ export const MODULES: readonly ModuleDef[] = [
     rows: 2,
     cols: 1,
     plate: 40,
-    shotLife: 1,
+    shotLife: 1.4,
     hook: true,
   },
   {

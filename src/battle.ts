@@ -443,7 +443,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       const angle = gun.mount === "turret" ? tank.turret : tank.angle;
       const reach = gun.hook ? 1.35 : gun.siege ? 2.35 : gun.heavy ? 1.7 : 0.95;
       const muzzle = mountPoint(tank, gun.lx, gun.ly - CELL * reach, gun.mount === "turret");
-      const speed = gun.hook ? 430 : gun.siege ? 470 : 540;
+      const speed = gun.hook ? 460 : gun.siege ? 470 : 540;
       shots.push({
         x: muzzle.x,
         y: muzzle.y,
@@ -570,7 +570,6 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       drawSmoothTank(player, "#2a3142");
       for (const tank of [rival, player]) drawSmoothShield(tank);
       for (const drone of drones) drawSmoothDrone(drone);
-      drawSmoothTether();
       for (const shot of shots) {
         pen.save();
         pen.translate(shot.x, shot.y);
@@ -621,7 +620,6 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       drawTank(player, PAL.navy, view);
       for (const tank of [rival, player]) drawPixelShield(tank, view);
       for (const drone of drones) drawPixelDrone(drone, view);
-      drawPixelTether(view);
       for (const shot of shots) drawShot(shot, view);
       for (const bit of particles) drawBit(bit, view);
     }
@@ -635,6 +633,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       artText(floater.text, floater.x, floater.y, view, PAL.paper);
     }
     for (const tank of [rival, player]) drawTankLabel(tank, view);
+    drawPixelTether(view);
     drawArrow(view);
   }
 
@@ -1040,26 +1039,6 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     pen.arc(0, 0, size * 0.1, 0, Math.PI * 2);
     pen.fill();
     pen.stroke();
-    pen.restore();
-  }
-
-  function drawSmoothTether(): void {
-    if (!tether || tether.life <= 0) return;
-    const owner = tether.owner === "player" ? player : rival;
-    const target = tether.owner === "player" ? rival : player;
-    const from = harpoonTip(owner) ?? { x: owner.x, y: owner.y };
-    pen.save();
-    pen.strokeStyle = PAL.cream;
-    pen.lineWidth = 3;
-    pen.lineCap = "round";
-    pen.beginPath();
-    pen.moveTo(from.x, from.y);
-    pen.lineTo(target.x, target.y);
-    pen.stroke();
-    pen.fillStyle = PAL.gold;
-    pen.beginPath();
-    pen.arc(target.x, target.y, 6, 0, Math.PI * 2);
-    pen.fill();
     pen.restore();
   }
 
@@ -1917,14 +1896,19 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     const from = harpoonTip(owner) ?? { x: owner.x, y: owner.y };
     const a = worldToArt(from.x, from.y, view);
     const b = worldToArt(target.x, target.y, view);
-    const steps = 14;
-    context.fillStyle = PAL.cream;
+    const steps = 18;
+    const size = Math.max(5, Math.round(view.cellPx * 0.28));
     for (let i = 0; i <= steps; i += 1) {
       const t = i / steps;
-      context.fillRect(Math.round(a.x + (b.x - a.x) * t), Math.round(a.y + (b.y - a.y) * t), 4, 4);
+      const x = Math.round(a.x + (b.x - a.x) * t);
+      const y = Math.round(a.y + (b.y - a.y) * t);
+      context.fillStyle = PAL.shadow;
+      context.fillRect(x + 2, y + 2, size, size);
+      context.fillStyle = i % 2 === 0 ? PAL.gold : PAL.cream;
+      context.fillRect(x, y, size, size);
     }
     context.fillStyle = PAL.gold;
-    context.fillRect(Math.round(b.x) - 4, Math.round(b.y) - 4, 8, 8);
+    context.fillRect(Math.round(b.x) - size, Math.round(b.y) - size, size * 2, size * 2);
   }
 
   function stepDecor(dt: number): void {
