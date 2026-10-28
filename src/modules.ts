@@ -140,8 +140,8 @@ export const MODULES: readonly ModuleDef[] = [
     name: "Robot Bay",
     starter: false,
     color: PAL.gray,
-    blurb: "launches a drone · uses 3",
-    stats: { powerUse: 3 },
+    blurb: "launches a drone · uses 6",
+    stats: { powerUse: 6 },
     rows: 2,
     cols: 2,
     plate: 48,
@@ -199,7 +199,7 @@ export const SHOP_ITEMS: readonly ShopItem[] = [
     moduleId: "robot-bay",
     cost: NEW_SHOP_COST,
     name: "Robot Bay",
-    tagline: "A 2×2 bay. In battle it launches one small drone that drives itself, steers around cover, and shoots the enemy. The rival can destroy it. Draws 3 power.",
+    tagline: "A 2×2 bay. In battle it launches one small drone that drives itself, steers around cover, and shoots the enemy. The rival can destroy it. Draws 6 power. Unpowered bays do not launch.",
   },
   {
     kind: "hull",
@@ -227,7 +227,7 @@ export const SHOP_ITEMS: readonly ShopItem[] = [
     moduleId: "repair-bay",
     cost: 200,
     name: "Repair Bay",
-    tagline: "Every few seconds, restores the most hurt block or rebuilds a destroyed one. Draws 2 power while it is fixing.",
+    tagline: "Every few seconds, restores the most hurt block or rebuilds a destroyed one. Draws 2 power whenever it is mounted.",
   },
   {
     kind: "module",

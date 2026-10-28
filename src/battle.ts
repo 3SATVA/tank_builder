@@ -23,7 +23,7 @@ import {
   type PartRole,
 } from "./modules";
 import { sfxBoom, sfxHit, sfxShot } from "./sfx";
-import { computeStats, fuelDrainPerSecond, maxDriveSpeed, maxTurnRate } from "./stats";
+import { cellPowered, computeStats, fuelDrainPerSecond, maxDriveSpeed, maxTurnRate, mobility, powerPlan } from "./stats";
 import type { ModuleKind } from "./types";
 
 const TURRET_TURN = 4.6;
@@ -229,6 +229,9 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   const fuelFill = el("span");
   fuelMeter.append(fuelFill);
   readout.append(fuelLabel, fuelMeter);
+  const stuck = el("p", "immobile", "Immobile");
+  stuck.hidden = true;
+  readout.append(stuck);
   const scrap = el("div", "scrap-pill hud-scrap");
   const scrapValue = el("span", undefined, "");
   scrap.append(el("span", "scrap-nut", "⬡"), scrapValue);
@@ -389,22 +392,30 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     const job = nextRepair(tank.grid, tank.plate, tank.blueprint);
     const bays = repairBays(tank);
     const working = Boolean(job) && bays > 0;
-    const stats = computeStats(tank.grid, { repairActive: working });
+    const stats = computeStats(tank.grid);
     if (tank.fuel > stats.fuel) tank.fuel = stats.fuel;
-    const throttle = Math.max(Math.abs(cmd.forward), Math.abs(cmd.turn) * 0.5);
+    const throttle = mobility(tank.grid, tank.fuel).mobile
+      ? Math.max(Math.abs(cmd.forward), Math.abs(cmd.turn) * 0.5)
+      : 0;
     if (tank.fuel > 0 && throttle > 0.02) {
       tank.fuel = Math.max(0, tank.fuel - fuelDrainPerSecond(stats, throttle) * dt);
     }
-    const signed = cmd.forward < 0 ? cmd.forward * 0.8 : cmd.forward;
-    const speed = maxDriveSpeed(stats, tank.fuel);
-    const wishX = Math.sin(tank.angle) * speed * signed;
-    const wishY = -Math.cos(tank.angle) * speed * signed;
-    const blend = 1 - Math.exp(-7 * dt);
-    tank.vx += (wishX - tank.vx) * blend;
-    tank.vy += (wishY - tank.vy) * blend;
+    const move = mobility(tank.grid, tank.fuel);
+    if (!move.mobile) {
+      tank.vx = 0;
+      tank.vy = 0;
+    } else {
+      const signed = cmd.forward < 0 ? cmd.forward * 0.8 : cmd.forward;
+      const speed = maxDriveSpeed(stats, tank.fuel);
+      const wishX = Math.sin(tank.angle) * speed * signed;
+      const wishY = -Math.cos(tank.angle) * speed * signed;
+      const blend = 1 - Math.exp(-7 * dt);
+      tank.vx += (wishX - tank.vx) * blend;
+      tank.vy += (wishY - tank.vy) * blend;
+      tank.angle += cmd.turn * maxTurnRate(stats) * dt;
+    }
     tank.x += tank.vx * dt;
     tank.y += tank.vy * dt;
-    tank.angle += cmd.turn * maxTurnRate(stats) * dt;
     const solved = resolveTank(map, tank.x, tank.y, tank.radius);
     tank.x = solved.x;
     tank.y = solved.y;
@@ -414,8 +425,8 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     tank.flash = Math.max(0, tank.flash - dt);
     tank.muzzle = Math.max(0, tank.muzzle - dt);
     tank.sparkLife = Math.max(0, tank.sparkLife - dt);
-    if (working && stats.powerFactor > 0 && job) {
-      tank.repairTimer -= dt * bays * stats.powerFactor;
+    if (working && bays > 0 && job) {
+      tank.repairTimer -= dt * bays;
       if (tank.repairTimer <= 0) {
         applyRepair(tank.grid, tank.plate, tank.blueprint, job);
         tank.repairTimer = 4;
@@ -433,8 +444,8 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
         emitExhaust(tank);
       }
     }
-    stepShield(tank, dt, stats.powerFactor);
-    stepLaunch(tank, dt, stats.powerFactor);
+    stepShield(tank, dt);
+    stepLaunch(tank, dt);
     if (tank.cooldown > 0) tank.cooldown -= dt;
     if (cmd.fire && tank.cooldown <= 0 && stats.fireRate > 0) {
       fireGuns(tank);
@@ -443,7 +454,11 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   }
 
   function fireGuns(tank: Tank): void {
-    const guns = listGuns(tank.grid, tank.hull);
+    const plan = powerPlan(tank.grid);
+    const guns = listGuns(tank.grid, tank.hull).filter((gun) =>
+      cellPowered(plan, tank.grid[gun.row]?.[gun.col] ?? null, gun.row, gun.col),
+    );
+    if (guns.length === 0) return;
     for (const gun of guns) {
       const angle = gun.mount === "turret" ? tank.turret : tank.angle;
       const reach = gun.hook ? 1.35 : gun.siege ? 2.35 : gun.heavy ? 1.7 : 0.95;
@@ -877,6 +892,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   function drawSmoothCells(tank: Tank, turretLayer: boolean): void {
     const cols = tank.grid[0]?.length ?? 1;
     const rows = tank.grid.length;
+    const plan = powerPlan(tank.grid);
     for (let r = 0; r < rows; r += 1) {
       for (let c = 0; c < cols; c += 1) {
         const turret = isTurretCell(r, c, cols, rows, tank.hull);
@@ -887,6 +903,9 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
         const x = center.x - size / 2;
         const y = center.y - size / 2;
         const mod = cellModule(id);
+        const unpowered = Boolean(mod && !cellPowered(plan, id, r, c));
+        pen.save();
+        if (unpowered) pen.globalAlpha = 0.4;
         pen.beginPath();
         pen.rect(x, y, size, size);
         pen.fillStyle = mod?.color ?? "#141820";
@@ -894,7 +913,10 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
         pen.lineWidth = mod?.id === "heavy-armor" ? 3.5 : 2;
         pen.strokeStyle = mod?.id === "heavy-armor" ? "#1a222c" : "#0e1116";
         pen.stroke();
-        if (!id || !mod) continue;
+        if (!id || !mod) {
+          pen.restore();
+          continue;
+        }
         const moving = Math.hypot(tank.vx, tank.vy) > 18;
         const role = partRole(id, r, c);
         if (mod.kind === "weapon") {
@@ -916,6 +938,16 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
         if (tank.sparkLife > 0 && tank.sparkCells.some((cell) => cell.r === r && cell.c === c)) {
           drawSmoothSpark(center.x, center.y, size, tank.sparkLife);
         }
+        if (unpowered) {
+          pen.globalAlpha = 1;
+          pen.strokeStyle = "#f0d050";
+          pen.lineWidth = 2;
+          pen.beginPath();
+          pen.moveTo(x + 4, y + 4);
+          pen.lineTo(x + size - 4, y + size - 4);
+          pen.stroke();
+        }
+        pen.restore();
         const plateMax = blockPlate(id);
         const left = plateMax > 0 ? tank.plate[r][c] / plateMax : 0;
         if (left < 0.999) {
@@ -1188,7 +1220,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     pen.rotate(drone.angle);
     pen.fillStyle = "rgba(0,0,0,0.3)";
     pen.beginPath();
-    pen.ellipse(0, 0, 22, 28, 0, 0, Math.PI * 2);
+    pen.ellipse(0, 0, 11, 14, 0, 0, Math.PI * 2);
     pen.fill();
     pen.restore();
     pen.save();
@@ -1198,29 +1230,29 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     pen.lineWidth = 2;
     pen.strokeStyle = "#0e1116";
     pen.fillStyle = "#141820";
-    pen.fillRect(-22, -18, 6, 36);
-    pen.fillRect(16, -18, 6, 36);
+    pen.fillRect(-11, -9, 3, 18);
+    pen.fillRect(8, -9, 3, 18);
     pen.fillStyle = drone.owner === "player" ? "#1c6e66" : "#8a3a28";
-    traceRoundRect(pen, -16, -22, 32, 44, 5);
+    traceRoundRect(pen, -8, -11, 16, 22, 3);
     pen.fill();
     pen.stroke();
     pen.fillStyle = drone.owner === "player" ? "#d8fff8" : "#ffd0b0";
-    traceRoundRect(pen, -5, -46, 10, 26, 2);
+    traceRoundRect(pen, -2.5, -23, 5, 13, 1);
     pen.fill();
     pen.stroke();
     pen.fillStyle = "#241c10";
-    pen.fillRect(-8, -48, 16, 5);
+    pen.fillRect(-4, -24, 8, 3);
     pen.fillStyle = "#ffb703";
     pen.beginPath();
-    pen.moveTo(0, -24);
-    pen.lineTo(7, -14);
-    pen.lineTo(-7, -14);
+    pen.moveTo(0, -12);
+    pen.lineTo(4, -7);
+    pen.lineTo(-4, -7);
     pen.closePath();
     pen.fill();
     if (drone.muzzle > 0) {
       pen.fillStyle = "rgba(255, 236, 160, 0.95)";
       pen.beginPath();
-      pen.arc(0, -50, 8, 0, Math.PI * 2);
+      pen.arc(0, -25, 4, 0, Math.PI * 2);
       pen.fill();
     }
     pen.restore();
@@ -1429,6 +1461,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     const cols = tank.grid[0]?.length ?? 1;
     const rows = tank.grid.length;
     const moving = Math.hypot(tank.vx, tank.vy) > 18;
+    const plan = powerPlan(tank.grid);
     for (let r = 0; r < rows; r += 1) {
       for (let c = 0; c < cols; c += 1) {
         if (isTurretCell(r, c, cols, rows, tank.hull) !== turretLayer) continue;
@@ -1451,7 +1484,14 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
           `${id ?? "empty"}-${role}-${art.width}x${art.height}-${cell}-${tank.muzzle > 0}-${moving}`,
         );
         const body = scaled.height - cell;
+        const unpowered = Boolean(id && !cellPowered(plan, token, r, c));
+        if (unpowered) ctx.globalAlpha = 0.4;
         ctx.drawImage(scaled, pad + c * cell, pad + r * cell - Math.max(0, body));
+        if (unpowered) {
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = PAL.gold;
+          ctx.fillRect(pad + c * cell + 2, pad + r * cell + Math.round(cell / 2), cell - 4, 2);
+        }
         if (tank.flash > 0 && ((r + c) % 2 === 0)) {
           ctx.fillStyle = PAL.white;
           ctx.fillRect(pad + c * cell + 2, pad + r * cell + 2, 2, 2);
@@ -1605,8 +1645,8 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   }
 
   function syncHud(): void {
-    const fixing = Boolean(nextRepair(player.grid, player.plate, player.blueprint)) && repairBays(player) > 0;
-    const stats = computeStats(player.grid, { repairActive: fixing });
+    const stats = computeStats(player.grid);
+    stuck.hidden = mobility(player.grid, player.fuel).mobile;
     fuelFill.style.width = `${stats.fuel > 0 ? clamp(player.fuel / stats.fuel, 0, 1) * 100 : 0}%`;
     const fuelText = fuelLabel.querySelector(".meter-value");
     if (fuelText) fuelText.textContent = String(Math.ceil(player.fuel));
@@ -1622,7 +1662,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   function statusLine(plates: number, weapons: number, rate: number, salvo: number): string {
     if (phase === "win") return "Rival down";
     if (phase === "lose") return "";
-    if (player.fuel <= 0) return "Fuel empty — crawling";
+    if (player.fuel <= 0) return "Fuel empty";
     if (weapons === 0) return "No cannon left";
     if (rate <= 0 && salvo > 0) return "Cannons unpowered";
     if (plates === 0) return "Armor gone";
@@ -1675,7 +1715,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       fuel: player.fuel,
       weapons: tally(player).weapons,
       power: tally(player).power,
-      speed: computeStats(player.grid, { repairActive: false }).speed,
+      speed: computeStats(player.grid).speed,
       shots: shots.length,
       phase,
       guns: listGuns(player.grid, player.hull).map((gun) => gun.mount),
@@ -1864,6 +1904,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       for (let r = 0; r < rows; r += 1) {
         for (let c = 0; c < cols; c += 1) {
           if (!isAnchorCell(tank.grid[r][c], r, c) || !cellModule(tank.grid[r][c])?.cutter) continue;
+          if (!cellPowered(powerPlan(tank.grid), tank.grid[r][c], r, c)) continue;
           const blade = cellBox(tank, r, c);
           blade.halfW += 2;
           blade.halfH += 2;
@@ -2000,26 +2041,26 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     return amount - used;
   }
 
-  function stepShield(tank: Tank, dt: number, powerFactor: number): void {
-    const gens = shieldGenerators(tank.grid);
+  function stepShield(tank: Tank, dt: number): void {
+    const gens = poweredCount(tank, (mod) => Boolean(mod.generator));
     tank.shieldMax = gens * SHIELD_HP;
     if (tank.shield > tank.shieldMax) tank.shield = tank.shieldMax;
     if (tank.shieldMax <= 0) return;
     if (tank.shieldDelay > 0) tank.shieldDelay = Math.max(0, tank.shieldDelay - dt);
-    else if (tank.shield < tank.shieldMax && powerFactor > 0) {
-      tank.shield = Math.min(tank.shieldMax, tank.shield + SHIELD_REGEN * gens * powerFactor * dt);
+    else if (tank.shield < tank.shieldMax) {
+      tank.shield = Math.min(tank.shieldMax, tank.shield + SHIELD_REGEN * gens * dt);
     }
   }
 
-  function stepLaunch(tank: Tank, dt: number, powerFactor: number): void {
-    const bays = droneBays(tank);
+  function stepLaunch(tank: Tank, dt: number): void {
+    const plan = powerPlan(tank.grid);
+    const bays = droneBays(tank).filter((key) => plan.powered.has(key));
     for (const key of bays) {
       const live = drones.some((drone) => drone.owner === tank.id && drone.bay === key && drone.hp > 0);
       if (live) {
         tank.launch[key] = DRONE_PERIOD;
         continue;
       }
-      if (powerFactor <= 0) continue;
       const left = (tank.launch[key] ?? DRONE_FIRST) - dt;
       tank.launch[key] = left;
       if (left <= 0) {
@@ -2044,7 +2085,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     const side = drones.filter((drone) => drone.owner === tank.id).length % 2 === 0 ? 1 : -1;
     const ang = tank.angle + side * 0.4;
     const dist = tank.radius + 40;
-    const spot = resolveTank(map, tank.x + Math.sin(ang) * dist, tank.y - Math.cos(ang) * dist, 22);
+    const spot = resolveTank(map, tank.x + Math.sin(ang) * dist, tank.y - Math.cos(ang) * dist, 11);
     drones.push({
       owner: tank.id,
       bay,
@@ -2054,7 +2095,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       hp: DRONE_HP,
       hpMax: DRONE_HP,
       cooldown: 0.2,
-      radius: 22,
+      radius: 11,
       flash: 0,
       muzzle: 0,
     });
@@ -2193,7 +2234,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     if (drone.hp <= 0) return;
     const at = worldToArt(drone.x, drone.y, view);
     const src = droneArt(drone.owner, drone.muzzle > 0);
-    const h = Math.max(18, Math.round(view.cellPx * 2.7));
+    const h = Math.max(10, Math.round(view.cellPx * 1.35));
     const w = Math.max(8, Math.round((h * src.width) / src.height));
     const scaled = nearestScale(src, w, h, `drone-${drone.owner}-${w}x${h}-${drone.muzzle > 0}`);
     context.save();
@@ -2232,7 +2273,7 @@ function spawnTank(
   hull = "standard",
 ): Tank {
   const grid = cloneGrid(blueprint);
-  const stats = computeStats(grid, { repairActive: false });
+  const stats = computeStats(grid);
   const cols = grid[0]?.length ?? 1;
   const rows = grid.length;
   return {
@@ -2265,11 +2306,15 @@ function spawnTank(
 }
 
 function shieldGenerators(grid: (string | null)[][]): number {
+  const plan = powerPlan(grid);
   let count = 0;
   grid.forEach((row, r) => {
     row.forEach((token, c) => {
       if (!isAnchorCell(token, r, c)) return;
-      if (cellModule(token)?.generator) count += 1;
+      const mod = cellModule(token);
+      if (!mod?.generator) return;
+      if ((mod.stats.powerUse ?? 0) > 0 && !plan.powered.has(`${r},${c}`)) return;
+      count += 1;
     });
   });
   return count;
@@ -2291,11 +2336,19 @@ function cellModule(token: string | null) {
 }
 
 function repairBays(tank: Tank): number {
+  return poweredCount(tank, (mod) => Boolean(mod.repairs));
+}
+
+function poweredCount(tank: Tank, match: (mod: NonNullable<ReturnType<typeof cellModule>>) => boolean): number {
+  const plan = powerPlan(tank.grid);
   let count = 0;
   tank.grid.forEach((row, r) => {
     row.forEach((token, c) => {
       if (!isAnchorCell(token, r, c)) return;
-      if (cellModule(token)?.repairs) count += 1;
+      const mod = cellModule(token);
+      if (!mod || !match(mod)) return;
+      if ((mod.stats.powerUse ?? 0) > 0 && !plan.powered.has(`${r},${c}`)) return;
+      count += 1;
     });
   });
   return count;

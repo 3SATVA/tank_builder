@@ -30,7 +30,7 @@ import {
 } from "./pvp";
 import { activeLayout, purchase } from "./save";
 import { sfxTap } from "./sfx";
-import { computeStats } from "./stats";
+import { cellPowered, computeStats, mobilityWarning, powerPlan } from "./stats";
 import type { ModuleDef, SaveData, ShopItem, TankStats } from "./types";
 
 export type ScreenId = "menu" | "garage" | "battle" | "shop" | "bots" | "pvp" | "board";
@@ -115,7 +115,7 @@ export function renderGarage(
     const owned = modulesFor(save.unlocked);
     if (!owned.some((mod) => mod.id === selected)) selected = owned[0]?.id ?? "armor";
     const grid = activeLayout(save);
-    const stats = computeStats(grid, { repairActive: true });
+    const stats = computeStats(grid);
     const cols = grid[0]?.length ?? 1;
 
     const bar = el("header", "topbar");
@@ -156,10 +156,14 @@ function buildStage(
   paint: () => void,
   note = "",
 ): HTMLElement {
+  const layout = activeLayout(save);
+  const rows = layout.length;
+  const plan = powerPlan(layout);
+  const moveWarning = mobilityWarning(layout);
   const stage = el("section", "builder");
   stage.append(el("h2", undefined, "Hull"), hullPicker(save, persist, paint), artStyleToggle(paint), hint(save.hull));
-  if (note) {
-    const warning = el("p", "battle-note", note);
+  if (note || moveWarning) {
+    const warning = el("p", "battle-note", [note, moveWarning].filter(Boolean).join(" "));
     warning.setAttribute("role", "status");
     stage.append(warning);
   }
@@ -172,8 +176,6 @@ function buildStage(
   grid.setAttribute("role", "grid");
   grid.setAttribute("aria-label", "Tank hull");
 
-  const layout = activeLayout(save);
-  const rows = layout.length;
   layout.forEach((row, r) => {
     row.forEach((token, c) => {
       const mod = getModule(moduleIdOf(token) ?? "");
@@ -190,6 +192,8 @@ function buildStage(
       if (mod?.kind === "engine") cell.classList.add("engine");
       if (mod?.id === "heavy-armor") cell.classList.add("heavy");
       if (mod?.id === "repair-bay") cell.classList.add("repair");
+      const unpowered = Boolean(mod && !cellPowered(plan, token, r, c));
+      if (unpowered) cell.classList.add("unpowered");
       cell.type = "button";
       cell.style.setProperty("--cell", mod?.color ?? "transparent");
       if (mod && mod.id === selected) cell.classList.add("matches");
@@ -203,11 +207,12 @@ function buildStage(
         "aria-label",
         mod
           ? mod.id === selected
-            ? `${mod.name}, ${place}. Tap to remove.`
-            : `${mod.name}, ${place}. Tap to replace.`
+            ? `${mod.name}${unpowered ? ", no power" : ""}, ${place}. Tap to remove.`
+            : `${mod.name}${unpowered ? ", no power" : ""}, ${place}. Tap to replace.`
           : `Empty bay, ${place}. Tap to place.`,
       );
       if (mod) cell.append(moduleFace(mod, role));
+      if (unpowered) cell.append(el("span", "no-power"));
       cell.addEventListener("click", () => {
         const board = activeLayout(save);
         if (!commitPlacement(board, save.hull, selected, r, c)) return;
@@ -417,9 +422,8 @@ function statPanel(stats: TankStats): HTMLElement {
   for (const [label, value, max, text] of rows) {
     list.append(statRow(label, value / max, text));
   }
-  const powerText =
-    stats.powerUse === 0 ? `${stats.power} supply` : `${stats.power} supply / ${stats.powerUse} draw`;
-  list.append(statRow("Power", stats.powerUse === 0 ? 0 : stats.power / Math.max(stats.powerUse, stats.power), powerText));
+  const overBudget = stats.powerUse > stats.power;
+  list.append(statRow("Power", stats.power <= 0 ? (overBudget ? 1 : 0) : Math.min(1, stats.powerUse / stats.power), `${stats.powerUse} / ${stats.power}`, overBudget));
   const damageText = stats.weaponCount > 0 ? `${Math.round(stats.damage)} × ${stats.weaponCount}` : "—";
   list.append(statRow("Damage", Math.min(1, stats.salvoDamage / 96), damageText));
   list.append(statRow("Fire rate", Math.min(1, stats.fireRate / 3), stats.fireRate > 0 ? `${stats.fireRate.toFixed(1)}/s` : "0/s"));
@@ -428,14 +432,13 @@ function statPanel(stats: TankStats): HTMLElement {
 }
 
 function powerNote(stats: TankStats): string {
+  if (stats.powerUse > stats.power) return "Over budget — unpowered blocks do nothing.";
   if (stats.weaponCount === 0) return "No weapons mounted.";
-  if (stats.powerFactor <= 0) return "No power — cannons stay cold.";
-  if (stats.powerFactor < 1) return "Low power — fire rate is reduced.";
-  return "Weapons are fully powered.";
+  return "Every draw is covered.";
 }
 
-function statRow(label: string, fraction: number, value: string): HTMLElement {
-  const row = el("div", "stat-row");
+function statRow(label: string, fraction: number, value: string, over = false): HTMLElement {
+  const row = el("div", over ? "stat-row over-budget" : "stat-row");
   const term = el("dt", undefined, label);
   const bar = el("div", "meter");
   const fill = el("span");
@@ -610,7 +613,7 @@ function shopCard(save: SaveData, item: ShopItem, persist: () => void, paint: ()
   return card;
 }
 
-export function renderPvp(go: (screen: ScreenId) => void, onFight: (launch: PvpLaunch) => void): HTMLElement {
+export function renderPvp(save: SaveData, go: (screen: ScreenId) => void, onFight: (launch: PvpLaunch) => void): HTMLElement {
   const root = el("div", "screen shop-screen");
   const paint = (): void => {
     const identity = readIdentity();
@@ -636,7 +639,7 @@ export function renderPvp(go: (screen: ScreenId) => void, onFight: (launch: PvpL
     if (!identity) {
       body.append(callsignForm(paint));
     } else {
-      body.append(finder(onFight));
+      body.append(finder(save, onFight));
     }
     root.replaceChildren(bar, body);
   };
@@ -679,7 +682,7 @@ function callsignForm(done: () => void): HTMLElement {
   return form;
 }
 
-function finder(onFight: (launch: PvpLaunch) => void): HTMLElement {
+function finder(save: SaveData, onFight: (launch: PvpLaunch) => void): HTMLElement {
   const wrap = el("div", "shop-list");
   const find = el("button", "btn btn-primary", "Find opponent");
   find.type = "button";
@@ -691,10 +694,16 @@ function finder(onFight: (launch: PvpLaunch) => void): HTMLElement {
     find.disabled = true;
     status.textContent = "Looking for a rival…";
     slot.replaceChildren();
-    void findOpponent()
-      .then((opponent) => {
+    void publishDefense(save.hull, activeLayout(save))
+      .then(() => "")
+      .catch((err: unknown) => (err instanceof Error ? err.message : "Defense wasn't posted."))
+      .then((note) => {
+        status.textContent = note ? `${note} Looking for a rival…` : "Looking for a rival…";
+        return findOpponent().then((opponent) => ({ opponent, note }));
+      })
+      .then(({ opponent, note }) => {
         if (!opponent) {
-          status.textContent = "No rivals yet. A yard bot will stand in.";
+          status.textContent = [note, "No rivals yet. A yard bot will stand in."].filter(Boolean).join(" ");
           const fight = el("button", "btn btn-primary", "Fight the stand-in");
           fight.type = "button";
           fight.addEventListener("click", () => {
@@ -704,7 +713,7 @@ function finder(onFight: (launch: PvpLaunch) => void): HTMLElement {
           slot.append(fight);
           return;
         }
-        status.textContent = "";
+        status.textContent = note;
         const card = el("article", "shop-card");
         card.dataset.pvp = "found";
         card.append(

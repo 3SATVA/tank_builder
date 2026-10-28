@@ -50,7 +50,7 @@ function show(screen: ScreenId, botId?: string): void {
     return;
   }
   if (screen === "pvp") {
-    app.replaceChildren(renderPvp(show, (launch) => {
+    app.replaceChildren(renderPvp(save, show, (launch) => {
       pvpLaunch = launch;
       show("battle");
     }));

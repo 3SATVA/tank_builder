@@ -534,6 +534,39 @@ h2 {
   color: var(--amber);
   font-weight: 800;
 }
+.stat-row.over-budget dd { color: #ff5d5d; }
+.stat-row.over-budget .meter > span { background: #d82838; }
+.cell.unpowered { filter: grayscale(0.4) brightness(0.55); }
+.no-power {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #141820;
+  border: 2px solid #f0d050;
+  z-index: 5;
+  pointer-events: none;
+}
+.no-power::after {
+  content: "";
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  top: 4px;
+  height: 2px;
+  background: #f0d050;
+  transform: rotate(-32deg);
+}
+.immobile {
+  margin: 0;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #ff5d5d;
+  font-size: 0.72rem;
+}
 .pvp-body {
   flex: 1;
   display: flex;
@@ -956,6 +989,8 @@ html[data-art="pixel"] .stats-panel,
 html[data-art="pixel"] .palette,
 html[data-art="pixel"] .shop-card,
 html[data-art="pixel"] .callsign-input,
+html[data-art="pixel"] .no-power,
+html[data-art="pixel"] .no-power::after,
 html[data-art="pixel"] .board-row,
 html[data-art="pixel"] .end-panel,
 html[data-art="pixel"] .hud-readout,
@@ -975,6 +1010,7 @@ html[data-art="pixel"] .pixel-sprite {
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 }
+html[data-art="pixel"] .no-power::after { transform: none; }
 html[data-art="pixel"] .joystick-base {
   background: #1c1a28;
   border: 4px solid #f4ecd4;
