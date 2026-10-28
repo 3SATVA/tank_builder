@@ -3,7 +3,8 @@ import { el } from "./dom";
 import { CELL, cellCenter, listGuns } from "./geometry";
 import { applyRepair, damageInstance, nextRepair } from "./grid";
 import { attachInput, type InputController } from "./input";
-import { angleDelta, clamp, localToWorld, rotateToward, worldToLocal } from "./math";
+import { readArtStyle } from "./config";
+import { angleDelta, clamp, localToWorld, rotateToward, traceRoundRect, worldToLocal } from "./math";
 import { hitsBlock, hitsHazard, pickMap, resolveTank, TILE, type ArenaMap, type MapBlock } from "./maps";
 import { PAL } from "./palette";
 import { CELL_ART, boomArt, moduleArt, nearestScale, obstacleArt, shotArt } from "./sprites";
@@ -17,9 +18,11 @@ import {
   isTurretCell,
   moduleIdOf,
   turretOrigin,
+  TURRET_SIZE,
 } from "./modules";
 import { sfxBoom, sfxHit, sfxShot } from "./sfx";
 import { computeStats, fuelDrainPerSecond, maxDriveSpeed, maxTurnRate } from "./stats";
+import type { ModuleKind } from "./types";
 
 const TURRET_TURN = 4.6;
 const LAVA_DPS = 18;
@@ -224,6 +227,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas unavailable");
   const context = ctx;
+  let pen: CanvasRenderingContext2D = context;
   const input = attachInput(moveStick.base, moveStick.knob, aimStick.base, aimStick.knob);
   const rivalAi = createBotController(options.rivalTuning);
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -477,15 +481,47 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       worldBuffer.canvas.height = cover;
     }
     const world = worldBuffer.ctx;
-    world.imageSmoothingEnabled = false;
+    const pixel = readArtStyle() === "pixel";
+    world.imageSmoothingEnabled = !pixel;
     world.setTransform(1, 0, 0, 1, 0, 0);
     world.fillStyle = PAL.void;
     world.fillRect(0, 0, cover, cover);
-    drawArena(world, view, cover);
+    if (pixel) {
+      drawArena(world, view, cover);
+    } else {
+      const scale = view.cellPx / CELL;
+      world.setTransform(scale, 0, 0, scale, cover / 2 - camX * scale, cover / 2 - camY * scale);
+      pen = world;
+      drawSmoothArena();
+      drawSmoothTank(rival, "#5a2430");
+      drawSmoothTank(player, "#2a3142");
+      for (const shot of shots) {
+        pen.save();
+        pen.translate(shot.x, shot.y);
+        pen.rotate(Math.atan2(shot.vy, shot.vx));
+        pen.fillStyle = shot.color;
+        traceRoundRect(pen, -12, -3, 16, 6, 3);
+        pen.fill();
+        pen.restore();
+      }
+      for (const bit of particles) {
+        pen.globalAlpha = Math.max(0, bit.life / bit.max);
+        pen.fillStyle = bit.color;
+        if (bit.puff) {
+          pen.beginPath();
+          pen.arc(bit.x, bit.y, bit.size, 0, Math.PI * 2);
+          pen.fill();
+        } else {
+          pen.fillRect(bit.x, bit.y, bit.size, bit.size);
+        }
+        pen.globalAlpha = 1;
+      }
+      pen = context;
+    }
 
     const jx = shake > 0 && !reduceMotion ? Math.round((Math.random() - 0.5) * 4) : 0;
     const jy = shake > 0 && !reduceMotion ? Math.round((Math.random() - 0.5) * 4) : 0;
-    context.imageSmoothingEnabled = false;
+    context.imageSmoothingEnabled = !pixel;
     context.setTransform(1, 0, 0, 1, 0, 0);
     context.fillStyle = PAL.void;
     context.fillRect(0, 0, canvas.width, canvas.height);
@@ -493,11 +529,15 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     context.rotate(-camAngle);
     context.drawImage(worldBuffer.canvas, -cover / 2, -cover / 2);
     context.setTransform(1, 0, 0, 1, 0, 0);
-    drawTank(rival, PAL.redDark, view);
-    drawTank(player, PAL.navy, view);
-    for (const shot of shots) drawShot(shot, view);
-    for (const bit of particles) drawBit(bit, view);
-    context.font = `${Math.max(16, view.cellPx)}px 'Press Start 2P', monospace`;
+    if (pixel) {
+      drawTank(rival, PAL.redDark, view);
+      drawTank(player, PAL.navy, view);
+      for (const shot of shots) drawShot(shot, view);
+      for (const bit of particles) drawBit(bit, view);
+    }
+    context.font = pixel
+      ? `${Math.max(16, view.cellPx)}px 'Press Start 2P', monospace`
+      : "700 32px Trebuchet MS, Verdana, sans-serif";
     context.textAlign = "center";
     context.textBaseline = "bottom";
     for (const floater of floaters) {
@@ -615,6 +655,372 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     const ux = Math.round((dx / dist) * 8);
     const uy = Math.round((dy / dist) * 8);
     context.fillRect(px - 4 + ux, py - 4 + uy, 8, 8);
+  }
+
+  function drawSmoothArena(): void {
+    pen.fillStyle = "#10141c";
+    pen.fillRect(-900, -900, map.w + 1800, map.h + 1800);
+    const cols = Math.round(map.w / TILE);
+    const rows = Math.round(map.h / TILE);
+    for (let r = 0; r < rows; r += 1) {
+      for (let c = 0; c < cols; c += 1) {
+        pen.fillStyle = (c + r) % 2 === 0 ? map.ground : map.alt;
+        pen.fillRect(c * TILE, r * TILE, TILE, TILE);
+        const n = (Math.imul(c + r * 17 + map.w, 1103515245) + 12345) >>> 16;
+        if ((n & 3) === 0) {
+          pen.fillStyle = "rgba(0,0,0,0.16)";
+          pen.fillRect(c * TILE + (n & 15), r * TILE + ((n >> 4) & 15), 7, 7);
+        }
+      }
+    }
+    for (const pool of map.hazards) drawSmoothLava(pool);
+    for (const block of map.blocks) drawSmoothCover(block);
+    pen.strokeStyle = map.edge;
+    pen.lineWidth = 10;
+    pen.strokeRect(5, 5, map.w - 10, map.h - 10);
+  }
+
+  function drawSmoothCover(block: MapBlock): void {
+    const { x, y, w, h, kind, color } = block;
+    pen.fillStyle = color;
+    pen.fillRect(x, y, w, h);
+    pen.strokeStyle = "#0e1116";
+    pen.lineWidth = 3;
+    pen.strokeRect(x + 1.5, y + 1.5, w - 3, h - 3);
+    if (kind === "H") {
+      pen.fillStyle = "#8a6a32";
+      pen.fillRect(x + 4, y + 8, w - 8, 5);
+      pen.fillRect(x + 4, y + 18, w - 8, 5);
+    } else if (kind === "R" || kind === "P" || kind === "#") {
+      pen.fillStyle = "rgba(0,0,0,0.28)";
+      pen.fillRect(x + 6, y + 6, 10, 10);
+      pen.fillRect(x + w - 14, y + h - 14, 8, 8);
+    } else if (kind === "K") {
+      pen.fillStyle = "#8a8478";
+      pen.fillRect(x + 3, y + 3, 6, 6);
+      pen.fillRect(x + w / 2 - 3, y + 3, 6, 6);
+      pen.fillRect(x + w - 9, y + 3, 6, 6);
+    } else if (kind === "T") {
+      pen.fillStyle = "#4a4038";
+      pen.fillRect(x + w / 2 - 2, y + 6, 4, h - 14);
+      pen.fillRect(x + 8, y + 10, w - 16, 4);
+    } else if (kind === "C") {
+      pen.fillStyle = "#1a1614";
+      pen.fillRect(x + 10, y + 12, w - 20, h - 16);
+      pen.fillStyle = "#cfc6b8";
+      pen.fillRect(x + 4, y + 4, w - 8, 5);
+    } else if (kind === "Y") {
+      pen.fillStyle = "#241810";
+      pen.fillRect(x + w / 2 - 3, y + 6, 6, h - 8);
+      pen.fillRect(x + 6, y + 8, w - 12, 5);
+      pen.fillRect(x + 8, y + 16, w - 16, 4);
+    } else if (kind === "F") {
+      pen.fillStyle = "#c5ccd4";
+      pen.fillRect(x + 5, y + 4, 3, h - 8);
+      pen.fillRect(x + w / 2 - 1, y + 4, 3, h - 8);
+      pen.fillRect(x + w - 8, y + 4, 3, h - 8);
+      pen.fillRect(x + 4, y + 8, w - 8, 3);
+    } else if (kind === "U" || kind === "N") {
+      pen.fillStyle = kind === "U" ? "#6e2f22" : "#8d7d62";
+      pen.fillRect(x, y, w, 9);
+      pen.fillStyle = "#f6f1e6";
+      pen.fillRect(x + 6, y + 14, 7, 7);
+      pen.fillRect(x + w - 13, y + 14, 7, 7);
+    } else if (kind === "X") {
+      pen.fillStyle = "#8a5a22";
+      pen.fillRect(x + 4, y + w / 2 - 2, w - 8, 4);
+      pen.fillRect(x + w / 2 - 2, y + 4, 4, h - 8);
+    } else if (kind === "S") {
+      pen.fillStyle = "#c4a15a";
+      pen.fillRect(x + 4, y + 6, 12, 8);
+      pen.fillStyle = "#4a4038";
+      pen.fillRect(x + 14, y + 14, 12, 10);
+    } else if (kind === "V" || kind === "D") {
+      pen.fillStyle = "#141820";
+      pen.fillRect(x + 3, y + h - 10, 8, 7);
+      pen.fillRect(x + w - 11, y + h - 10, 8, 7);
+      pen.fillStyle = "#d7e2ea";
+      pen.fillRect(x + 7, y + 6, w - 14, 8);
+    } else if (kind === "I") {
+      pen.fillStyle = "#2a2a2a";
+      pen.fillRect(x + 5, y + 4, w - 10, 7);
+      pen.fillRect(x + 5, y + 13, w - 10, 7);
+      pen.fillRect(x + 5, y + 22, w - 10, 6);
+      pen.fillStyle = "#5c5346";
+      pen.fillRect(x + 12, y + 5, 8, 5);
+      pen.fillRect(x + 12, y + 14, 8, 5);
+    }
+  }
+
+  function drawSmoothLava(block: MapBlock): void {
+    pen.fillStyle = block.color;
+    pen.fillRect(block.x, block.y, block.w, block.h);
+    const flicker = reduceMotion ? 0 : Math.sin(simTime * 5 + block.x * 0.08) * 2;
+    pen.fillStyle = "#ffba08";
+    pen.fillRect(block.x + 7, block.y + 7 + flicker * 0.15, block.w - 14, block.h - 14);
+    pen.fillStyle = "#fff3bf";
+    pen.fillRect(block.x + 13, block.y + 13, 6, 6);
+  }
+
+  function drawSmoothTank(tank: Tank, chassis: string): void {
+    const cols = tank.grid[0]?.length ?? 1;
+    const rows = tank.grid.length;
+    const bodyW = cols * CELL;
+    const bodyH = rows * CELL;
+    pen.save();
+    pen.translate(tank.x + 4, tank.y + 6);
+    pen.rotate(tank.angle);
+    pen.fillStyle = "rgba(0,0,0,0.28)";
+    pen.beginPath();
+    pen.ellipse(0, 0, bodyW * 0.42, bodyH * 0.42, 0, 0, Math.PI * 2);
+    pen.fill();
+    pen.restore();
+
+    pen.save();
+    pen.globalAlpha = tank.flash > 0 ? 0.72 : 1;
+    pen.translate(tank.x, tank.y);
+    pen.rotate(tank.angle);
+    traceRoundRect(pen, -bodyW / 2 - 4, -bodyH / 2 - 4, bodyW + 8, bodyH + 8, 12);
+    pen.fillStyle = chassis;
+    pen.fill();
+    pen.strokeStyle = "#0e1116";
+    pen.lineWidth = 4;
+    pen.stroke();
+    pen.fillStyle = "#ffb703";
+    pen.beginPath();
+    pen.moveTo(0, -bodyH / 2 - 12);
+    pen.lineTo(10, -bodyH / 2 + 2);
+    pen.lineTo(-10, -bodyH / 2 + 2);
+    pen.closePath();
+    pen.fill();
+    drawSmoothCells(tank, false);
+    pen.restore();
+
+    const pivot = turretPivot(cols, rows, tank.hull);
+    const pivoted = localToWorld(pivot.x, pivot.y, tank.angle);
+    pen.save();
+    pen.translate(tank.x + pivoted.x, tank.y + pivoted.y);
+    pen.rotate(tank.turret);
+    pen.translate(-pivot.x, -pivot.y);
+    drawSmoothCells(tank, true);
+    const origin = turretOrigin(tank.hull);
+    const top = cellCenter(origin.c, origin.r, cols, rows);
+    pen.strokeStyle = "#ffb703";
+    pen.lineWidth = 3;
+    traceRoundRect(pen, top.x - CELL / 2 - 2, top.y - CELL / 2 - 2, TURRET_SIZE * CELL + 4, TURRET_SIZE * CELL + 4, 8);
+    pen.stroke();
+    pen.restore();
+
+  }
+
+  function drawSmoothCells(tank: Tank, turretLayer: boolean): void {
+    const cols = tank.grid[0]?.length ?? 1;
+    const rows = tank.grid.length;
+    for (let r = 0; r < rows; r += 1) {
+      for (let c = 0; c < cols; c += 1) {
+        const turret = isTurretCell(r, c, cols, rows, tank.hull);
+        if (turret !== turretLayer) continue;
+        const id = tank.grid[r][c];
+        const center = cellCenter(c, r, cols, rows);
+        const size = CELL - 3;
+        const x = center.x - size / 2;
+        const y = center.y - size / 2;
+        const mod = cellModule(id);
+        pen.beginPath();
+        pen.rect(x, y, size, size);
+        pen.fillStyle = mod?.color ?? "#141820";
+        pen.fill();
+        pen.lineWidth = mod?.id === "heavy-armor" ? 3.5 : 2;
+        pen.strokeStyle = mod?.id === "heavy-armor" ? "#1a222c" : "#0e1116";
+        pen.stroke();
+        if (isCoreCell(r, c, cols, rows, tank.hull)) {
+          pen.fillStyle = "#ff5d5d";
+          pen.beginPath();
+          pen.arc(x + size - 5, y + size - 5, 2.4, 0, Math.PI * 2);
+          pen.fill();
+        }
+        if (!id || !mod) continue;
+        const moving = Math.hypot(tank.vx, tank.vy) > 18;
+        const anchor = isAnchorCell(id, r, c);
+        if (mod.kind === "weapon") {
+          if (mod.id === "medium-cannon" && !anchor) drawSmoothBreech(center.x, center.y, size);
+          else drawSmoothCannon(center.x, center.y, size, tank.muzzle > 0, (mod.rows ?? 1) > 1);
+        } else if (mod.kind === "engine") drawSmoothEngine(center.x, center.y, size, moving, simTime + r * 1.7 + c);
+        else {
+          pen.fillStyle = "rgba(255,255,255,0.22)";
+          pen.fillRect(x + 3, y + 3, size - 6, 4);
+          if (mod.id === "heavy-armor") drawSmoothRivets(x, y, size);
+          else if (mod.repairs) drawSmoothPlus(center.x, center.y, size * 0.28);
+          else drawSmoothGlyph(mod.kind, center.x, center.y, size * 0.26);
+        }
+        if (tank.sparkLife > 0 && tank.sparkCells.some((cell) => cell.r === r && cell.c === c)) {
+          drawSmoothSpark(center.x, center.y, size, tank.sparkLife);
+        }
+        const plateMax = blockPlate(id);
+        const left = plateMax > 0 ? tank.plate[r][c] / plateMax : 0;
+        if (left < 0.999) {
+          pen.fillStyle = "rgba(14,17,22,0.45)";
+          pen.fillRect(x + 3, y + size - 6, size - 6, 3);
+          pen.fillStyle = "#f6f1e6";
+          pen.fillRect(x + 3, y + size - 6, (size - 6) * clamp(left, 0, 1), 3);
+        }
+      }
+    }
+  }
+
+  function drawSmoothGlyph(kind: ModuleKind, x: number, y: number, s: number): void {
+    pen.save();
+    pen.translate(x, y);
+    pen.strokeStyle = "rgba(14,17,22,0.55)";
+    pen.fillStyle = "rgba(14,17,22,0.55)";
+    pen.lineWidth = 2;
+    pen.lineCap = "round";
+    pen.beginPath();
+    if (kind === "armor") {
+      pen.rect(-s, -s, s * 2, s * 2);
+      pen.stroke();
+    } else if (kind === "tracks") {
+      pen.moveTo(-s, -s * 0.5);
+      pen.lineTo(s, -s * 0.5);
+      pen.moveTo(-s, 0);
+      pen.lineTo(s, 0);
+      pen.moveTo(-s, s * 0.5);
+      pen.lineTo(s, s * 0.5);
+      pen.stroke();
+    } else if (kind === "power") {
+      pen.moveTo(s * 0.15, -s);
+      pen.lineTo(-s * 0.45, s * 0.1);
+      pen.lineTo(0, s * 0.1);
+      pen.lineTo(-s * 0.1, s);
+      pen.lineTo(s * 0.55, -s * 0.05);
+      pen.closePath();
+      pen.fill();
+    } else if (kind === "fuel") {
+      pen.arc(0, 0, s * 0.55, 0, Math.PI * 2);
+      pen.fill();
+    }
+    pen.restore();
+  }
+
+  function drawSmoothCannon(x: number, y: number, size: number, flash: boolean, heavy = false): void {
+    const half = size / 2;
+    const width = size * (heavy ? 0.48 : 0.3);
+    const length = size * (heavy ? 1.9 : 1.05);
+    pen.save();
+    pen.translate(x, y);
+    pen.fillStyle = "#d8fff8";
+    pen.strokeStyle = "#0e1116";
+    pen.lineWidth = 2;
+    traceRoundRect(pen, -width / 2, -half - length * 0.62, width, length, 2);
+    pen.fill();
+    pen.stroke();
+    pen.fillStyle = "#12312e";
+    pen.fillRect(-width * 0.22, -half - length * 0.62, width * 0.44, 3);
+    pen.fillStyle = "rgba(14,17,22,0.35)";
+    pen.fillRect(-half * 0.7, half * 0.15, half * 1.4, half * 0.55);
+    if (flash) {
+      pen.fillStyle = "rgba(255, 236, 160, 0.95)";
+      pen.beginPath();
+      pen.arc(0, -half - length * 0.7, size * 0.32, 0, Math.PI * 2);
+      pen.fill();
+      pen.fillStyle = "#fff7d6";
+      pen.beginPath();
+      pen.arc(0, -half - length * 0.7, size * 0.14, 0, Math.PI * 2);
+      pen.fill();
+    }
+    pen.restore();
+  }
+
+  function drawSmoothBreech(x: number, y: number, size: number): void {
+    const half = size / 2;
+    pen.save();
+    pen.translate(x, y);
+    pen.fillStyle = "rgba(14,17,22,0.4)";
+    pen.strokeStyle = "#0e1116";
+    pen.lineWidth = 2;
+    traceRoundRect(pen, -half * 0.72, -half * 0.2, half * 1.44, half * 0.9, 2);
+    pen.fill();
+    pen.stroke();
+    pen.restore();
+  }
+
+  function drawSmoothRivets(x: number, y: number, size: number): void {
+    pen.fillStyle = "#d5dde6";
+    const inset = 5;
+    for (const [px, py] of [
+      [inset, inset],
+      [size - inset, inset],
+      [inset, size - inset],
+      [size - inset, size - inset],
+    ]) {
+      pen.beginPath();
+      pen.arc(x + px, y + py, 1.7, 0, Math.PI * 2);
+      pen.fill();
+    }
+  }
+
+  function drawSmoothPlus(x: number, y: number, s: number): void {
+    pen.save();
+    pen.translate(x, y);
+    pen.strokeStyle = "rgba(14,17,22,0.7)";
+    pen.lineWidth = 2.4;
+    pen.lineCap = "round";
+    pen.beginPath();
+    pen.moveTo(0, -s);
+    pen.lineTo(0, s);
+    pen.moveTo(-s, 0);
+    pen.lineTo(s, 0);
+    pen.stroke();
+    pen.restore();
+  }
+
+  function drawSmoothSpark(x: number, y: number, size: number, life: number): void {
+    pen.save();
+    pen.globalAlpha = Math.min(1, life * 2.2);
+    pen.strokeStyle = "#e7ffc8";
+    pen.fillStyle = "#b6f58a";
+    pen.lineWidth = 1.5;
+    const s = size * 0.18;
+    for (const [ox, oy] of [
+      [-s, -s],
+      [s, -s * 0.2],
+      [0, s],
+    ]) {
+      pen.beginPath();
+      pen.moveTo(x + ox - 3, y + oy);
+      pen.lineTo(x + ox + 3, y + oy);
+      pen.moveTo(x + ox, y + oy - 3);
+      pen.lineTo(x + ox, y + oy + 3);
+      pen.stroke();
+    }
+    pen.restore();
+  }
+
+  function drawSmoothEngine(x: number, y: number, size: number, moving: boolean, phase: number): void {
+    const half = size / 2;
+    pen.save();
+    pen.translate(x, y);
+    pen.fillStyle = "#3a1612";
+    pen.strokeStyle = "#0e1116";
+    pen.lineWidth = 1.6;
+    for (let i = 0; i < 3; i += 1) {
+      const bob = moving && !reduceMotion ? Math.sin(phase * 22 + i * 1.4) * 1.5 : 0;
+      const px = (i - 1) * size * 0.28;
+      const ph = size * (i === 1 ? 0.34 : 0.42);
+      traceRoundRect(pen, px - size * 0.09, -half * 0.15 + bob - ph, size * 0.18, ph, 1.5);
+      pen.fill();
+      pen.stroke();
+    }
+    pen.strokeStyle = "#1a0c0a";
+    pen.lineWidth = 2.4;
+    pen.lineCap = "round";
+    pen.beginPath();
+    pen.moveTo(-size * 0.2, half * 0.15);
+    pen.lineTo(-size * 0.2, half + size * 0.28);
+    pen.moveTo(size * 0.2, half * 0.35);
+    pen.lineTo(size * 0.2, half + size * 0.22);
+    pen.stroke();
+    pen.restore();
   }
 
   function drawArena(world: CanvasRenderingContext2D, view: Frame, cover: number): void {

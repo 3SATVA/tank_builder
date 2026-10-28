@@ -1,4 +1,5 @@
 import { mountBattle } from "./battle";
+import { applyArtStyle } from "./config";
 import { getBot } from "./bots";
 import { activeLayout, loadSave, saveGame } from "./save";
 import { renderBots, renderGarage, renderMenu, renderShop, type ScreenId } from "./screens";
@@ -6,6 +7,7 @@ import { unlockAudio } from "./sfx";
 import "./style.css";
 
 installZoomLock();
+applyArtStyle();
 
 const root = document.querySelector<HTMLElement>("#app");
 if (!root) throw new Error("Missing #app");
