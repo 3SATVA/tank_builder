@@ -1,4 +1,5 @@
-import { angleDelta, clamp } from "./math";
+import { hasLineOfSight, steerPoint, type ArenaMap } from "./maps";
+import { angleDelta, clamp, localToWorld } from "./math";
 
 /**
  * Both the player and a rival (bot today, remote player later) drive a tank
@@ -34,7 +35,7 @@ export interface ShotView {
 export interface TankControlContext {
   self: CombatantView;
   foe: CombatantView | null;
-  arena: { w: number; h: number };
+  arena: ArenaMap;
   /** Shots that can hurt this tank. */
   incoming: readonly ShotView[];
   dt: number;
@@ -66,7 +67,8 @@ const SHOT_SPEED = 540;
 
 /**
  * Same drive commands as the player. Tuning decides aim, lead, reaction,
- * dodge, and the range the hull tries to keep.
+ * dodge, and the range the hull tries to keep. Cover is pathed around, and
+ * the gun stays quiet unless the foe is actually in sight.
  */
 export function createBotController(tuning: BotTuning): TankController {
   let weave = 0;
@@ -94,25 +96,24 @@ export function createBotController(tuning: BotTuning): TankController {
       const dy = foe.y - ctx.self.y;
       const dist = Math.hypot(dx, dy) || 1;
       const flight = (dist / SHOT_SPEED) * tuning.lead;
-      const tx = foe.x + (foe.vx ?? 0) * flight;
-      const ty = foe.y + (foe.vy ?? 0) * flight;
-      const aim = Math.atan2(tx - ctx.self.x, -(ty - ctx.self.y)) + Math.sin(weave * 2.2) * tuning.wobble;
-
-      let face = aim;
-      let forward = 1;
-      if (dist < tuning.near) forward = -1;
-      else if (dist > tuning.far) forward = 1;
-      else {
-        face = aim + strafeSign * tuning.strafe * 0.9;
-        forward = 0.35 + tuning.strafe * 0.45;
+      const aim =
+        Math.atan2(foe.x + (foe.vx ?? 0) * flight - ctx.self.x, -(foe.y + (foe.vy ?? 0) * flight - ctx.self.y)) +
+        Math.sin(weave * 2.2) * tuning.wobble;
+      const span = Math.max(ctx.arena.w, ctx.arena.h);
+      const far = Math.min(tuning.far, span * 0.46);
+      const near = Math.min(tuning.near, far * 0.55);
+      let goalX = foe.x;
+      let goalY = foe.y;
+      if (dist < near) {
+        goalX = ctx.self.x - (dx / dist) * 140;
+        goalY = ctx.self.y - (dy / dist) * 140;
+      } else if (dist <= far) {
+        const sideX = -dy / dist;
+        const sideY = dx / dist;
+        const ring = (near + far) / 2;
+        goalX = foe.x + sideX * strafeSign * ring;
+        goalY = foe.y + sideY * strafeSign * ring;
       }
-
-      const margin = 170;
-      if (ctx.self.x < margin) face = Math.PI / 2;
-      else if (ctx.self.x > ctx.arena.w - margin) face = -Math.PI / 2;
-      else if (ctx.self.y < margin) face = Math.PI;
-      else if (ctx.self.y > ctx.arena.h - margin) face = 0;
-
       for (const shot of ctx.incoming) {
         const sx = ctx.self.x - shot.x;
         const sy = ctx.self.y - shot.y;
@@ -120,18 +121,33 @@ export function createBotController(tuning: BotTuning): TankController {
         const approach = (shot.vx * sx + shot.vy * sy) / sd;
         if (sd < tuning.dodge && approach > 40) {
           const side = Math.sign(sx * shot.vy - sy * shot.vx) || strafeSign;
-          face = aim + (side * Math.PI) / 2;
-          forward = 1;
+          const right = localToWorld(1, 0, aim);
+          goalX = ctx.self.x + right.x * side * 120;
+          goalY = ctx.self.y + right.y * side * 120;
           break;
         }
       }
-
+      const aimError = Math.abs(angleDelta(ctx.self.turret, aim));
+      const los = hasLineOfSight(ctx.arena, ctx.self.x, ctx.self.y, foe.x, foe.y);
+      const fire = aimError < tuning.aimSlack && los && dist > 64;
+      const steer = steerPoint(ctx.arena, ctx.self.x, ctx.self.y, goalX, goalY);
+      if (!steer) {
+        held = { forward: 0, turn: 0.45, aimAngle: aim, fire };
+        return held;
+      }
+      const sdx = steer.x - ctx.self.x;
+      const sdy = steer.y - ctx.self.y;
+      if (Math.hypot(sdx, sdy) < 14) {
+        held = { forward: 0, turn: 0.35 * strafeSign, aimAngle: aim, fire };
+        return held;
+      }
+      const face = Math.atan2(sdx, -sdy);
       const delta = angleDelta(ctx.self.angle, face);
       const turn = clamp(delta / 0.45, -1, 1);
-      if (Math.abs(delta) > 0.7 && dist > tuning.near) forward *= 0.45;
-      const aimError = Math.abs(angleDelta(ctx.self.turret, aim));
-      const fire = aimError < tuning.aimSlack && dist < 860 && dist > 120;
-      held = { forward: clamp(forward, -1, 1), turn, aimAngle: aim, fire };
+      let forward = 1;
+      if (Math.abs(delta) > 1.05) forward = 0.2;
+      else if (Math.abs(delta) > 0.7) forward = 0.55;
+      held = { forward, turn, aimAngle: aim, fire };
       return held;
     },
   };
