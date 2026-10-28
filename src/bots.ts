@@ -68,7 +68,7 @@ export const BOTS: readonly BotDef[] = [
       ["fuel", "power", "fuel", "power", "fuel"],
       [null, "medium-cannon@4,1", "armor", "cannon", null],
       ["armor", "medium-cannon@4,1", "power", "power", "armor"],
-      ["tracks", "armor", "armor", "armor", "tracks"],
+      ["tracks", "armor", "power", "armor", "tracks"],
     ],
   },
 ];
