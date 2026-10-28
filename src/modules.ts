@@ -167,7 +167,7 @@ export const SHOP_ITEMS: readonly ShopItem[] = [
     hullId: "gun-deck",
     cost: NEW_SHOP_COST,
     name: "Gun Deck",
-    tagline: "No turret, and a wider, longer hull with more bays. Every gun is bolted to the hull and fires the way the hull faces. The aim stick still fires.",
+    tagline: "No turret. Six blocks wide and seven long, with more bays than the standard hull. Every gun is bolted to the hull and the aim stick still fires. Starts empty.",
   },
   {
     kind: "module",
@@ -273,13 +273,13 @@ export const HULLS: readonly HullDef[] = [
   {
     id: "gun-deck",
     name: "Gun deck",
-    blurb: "No turret. Wider and longer. Guns fire with the hull.",
+    blurb: "No turret. 6 wide, 7 long. Guns fire with the hull.",
     starter: false,
-    cols: 7,
-    rows: 8,
+    cols: 6,
+    rows: 7,
     mark: "Deck",
     turret: null,
-    core: { r: 3, c: 3 },
+    core: { r: 3, c: 2 },
   },
 ];
 
@@ -385,35 +385,24 @@ export function cloneGrid(grid: ReadonlyArray<ReadonlyArray<string | null>>): (s
   return grid.map((row) => row.slice());
 }
 
+/** Empty bays for a hull. Bought hulls and their Reset button use this. */
+export function emptyGrid(hull = "standard"): (string | null)[][] {
+  const size = hullSize(hull);
+  return Array.from({ length: size.rows }, () => Array.from({ length: size.cols }, () => null));
+}
+
+export function gridHasModules(grid: ReadonlyArray<ReadonlyArray<string | null>>): boolean {
+  return grid.some((row) => row.some((cell) => moduleIdOf(cell)));
+}
+
 /**
  * 5 wide × 7 long. Row 0 is the front, so the long axis is the direction the hull drives and hull guns fire.
- * Standard turret is rows 2–4. Rear turret is rows 4–6, so more of the hull sits in front.
- * Two cannons sit on the front of the hull; two sit on the turret. Two power cells feed the four cannons.
+ * The starter hull ships with a working loadout. Every other hull starts blank; the core is a cell, not a block.
+ * Standard turret is rows 2–4. Rear turret is rows 4–6.
  */
 export function createDefaultGrid(hull = "standard"): (string | null)[][] {
-  if (hull === "gun-deck") {
-    return [
-      ["armor", "cannon", "armor", "cannon", "armor", "cannon", "armor"],
-      ["tracks", "engine", "armor", "armor", "armor", "engine", "tracks"],
-      ["armor", "fuel", "power", "armor", "power", "fuel", "armor"],
-      ["tracks", "armor", "fuel", "armor", "fuel", "armor", "tracks"],
-      ["armor", "power", "armor", "power", "armor", "power", "armor"],
-      ["tracks", "engine", "armor", "cannon", "armor", "engine", "tracks"],
-      ["armor", "cannon", "fuel", "armor", "fuel", "cannon", "armor"],
-      ["armor", "tracks", "armor", "armor", "armor", "tracks", "armor"],
-    ];
-  }
-  if (hull === "rear") {
-    return [
-      ["armor", "cannon", "armor", "cannon", "armor"],
-      ["tracks", "engine", null, "engine", "tracks"],
-      [null, "armor", null, "armor", null],
-      [null, "fuel", null, "fuel", null],
-      [null, "cannon", "armor", "cannon", null],
-      ["fuel", null, "power", null, "fuel"],
-      ["tracks", "armor", "power", "armor", "tracks"],
-    ];
-  }
+  const spec = getHull(hull);
+  if (spec && !spec.starter) return emptyGrid(hull);
   return [
     ["armor", "cannon", "armor", "cannon", "armor"],
     ["tracks", "engine", null, "engine", "tracks"],

@@ -1,4 +1,4 @@
-import { cloneGrid, createDefaultGrid, getHull, getModule, hullSize, moduleIdOf } from "./modules";
+import { cloneGrid, createDefaultGrid, emptyGrid, getHull, getModule, hullSize, moduleIdOf } from "./modules";
 import type { SaveData, ShopItem } from "./types";
 
 const KEY = "tank-builder-save-v4";
@@ -67,37 +67,74 @@ function readBots(raw: { botsBeaten?: unknown } | null): number {
   return Math.max(0, Math.min(3, value));
 }
 
-function layoutFrom(value: unknown, hullId: string): (string | null)[][] | null {
-  if (!isGrid(value) || !fitsHull(value, hullId)) return null;
-  return cleanGrid(value);
+/**
+ * Keep every part that still sits inside the hull. A multi-cell part is dropped whole
+ * when any of its cells fall outside, which is how a 7×8 gun deck becomes 6×7.
+ * Placed blocks are not a stocked inventory, so a dropped part is not refunded.
+ */
+function reshapeLayout(grid: (string | null)[][], hullId: string): (string | null)[][] {
+  const size = hullSize(hullId);
+  const next = emptyGrid(hullId);
+  const seen = new Set<string>();
+  for (let r = 0; r < grid.length; r += 1) {
+    for (let c = 0; c < grid[r].length; c += 1) {
+      const token = grid[r][c];
+      if (!token || !moduleIdOf(token)) continue;
+      const key = token.includes("@") ? token : `${r},${c}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const cells = token.includes("@")
+        ? grid.flatMap((line, br) => line.flatMap((value, bc) => (value === token ? [{ r: br, c: bc }] : [])))
+        : [{ r, c }];
+      const inside = cells.every((cell) => cell.r < size.rows && cell.c < size.cols);
+      if (!inside) continue;
+      for (const cell of cells) next[cell.r][cell.c] = token;
+    }
+  }
+  return next;
 }
 
-function sanitize(raw: RawSave | null): SaveData {
+function layoutFrom(value: unknown, hullId: string): { grid: (string | null)[][]; reshaped: boolean } | null {
+  if (!isGrid(value)) return null;
+  if (fitsHull(value, hullId)) return { grid: cleanGrid(value), reshaped: false };
+  return { grid: reshapeLayout(value, hullId), reshaped: true };
+}
+
+function sanitize(raw: RawSave | null): { save: SaveData; reshaped: boolean } {
   const currency = readCurrency(raw);
   const unlocked = readUnlocked(raw);
   const layouts: Record<string, (string | null)[][]> = {};
+  let reshaped = false;
   if (raw && raw.layouts && typeof raw.layouts === "object") {
     for (const [id, grid] of Object.entries(raw.layouts as Record<string, unknown>)) {
       if (!ownsHull(id, unlocked)) continue;
       const clean = layoutFrom(grid, id);
-      if (clean) layouts[id] = clean;
+      if (!clean) continue;
+      layouts[id] = clean.grid;
+      if (clean.reshaped) reshaped = true;
     }
   }
   if (!layouts.standard) {
     const legacy = raw ? layoutFrom(raw.grid, "standard") : null;
-    layouts.standard = legacy ?? createDefaultGrid("standard");
+    if (legacy?.reshaped) reshaped = true;
+    layouts.standard = legacy?.grid ?? createDefaultGrid("standard");
   }
   let hull = typeof raw?.hull === "string" && ownsHull(raw.hull, unlocked) ? raw.hull : "standard";
   if (!layouts[hull]) layouts[hull] = createDefaultGrid(hull);
   for (const id of unlocked) {
     if (getHull(id) && !layouts[id]) layouts[id] = createDefaultGrid(id);
   }
-  return { version: 1, currency, unlocked, hull, layouts, botsBeaten: readBots(raw) };
+  return { save: { version: 1, currency, unlocked, hull, layouts, botsBeaten: readBots(raw) }, reshaped };
 }
 
 export function activeLayout(save: SaveData): (string | null)[][] {
   const grid = save.layouts[save.hull];
   if (grid && fitsHull(grid, save.hull)) return grid;
+  if (grid) {
+    const fitted = reshapeLayout(grid, save.hull);
+    save.layouts[save.hull] = fitted;
+    return fitted;
+  }
   const fresh = createDefaultGrid(save.hull);
   save.layouts[save.hull] = fresh;
   return fresh;
@@ -108,19 +145,19 @@ export function loadSave(): SaveData {
     const current = localStorage.getItem(KEY);
     if (current) {
       const parsed = JSON.parse(current) as RawSave;
-      const save = sanitize(parsed);
+      const { save, reshaped } = sanitize(parsed);
       const legacyOnly = !parsed.layouts || !parsed.hull;
-      if (legacyOnly) saveGame(save);
+      if (legacyOnly || reshaped) saveGame(save);
       return save;
     }
     for (const key of OLD_KEYS) {
       const legacy = localStorage.getItem(key);
       if (!legacy) continue;
       const parsed = JSON.parse(legacy) as RawSave;
-      const migrated = sanitize(parsed);
+      const { save: migrated } = sanitize(parsed);
       const kept = layoutFrom(parsed.grid, "standard");
       migrated.hull = "standard";
-      migrated.layouts = { standard: kept ?? createDefaultGrid("standard") };
+      migrated.layouts = { standard: kept?.grid ?? createDefaultGrid("standard") };
       migrated.botsBeaten = readBots(parsed);
       for (const stale of OLD_KEYS) localStorage.removeItem(stale);
       saveGame(migrated);

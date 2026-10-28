@@ -481,6 +481,11 @@ h2 {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+.battle-note {
+  margin: 0;
+  color: var(--amber);
+  font-weight: 800;
+}
 .builder-tools { display: flex; justify-content: center; }
 
 .stats-panel, .palette, .empty-shop, .shop-card, .end-panel {
