@@ -36,6 +36,10 @@ export interface ModuleDef {
   shotLife?: number;
   /** Draws power and fixes other blocks while something on the tank is hurt. */
   repairs?: boolean;
+  /** Launches one drone at a time while it has power. */
+  drone?: boolean;
+  /** Adds a rechargeable shield bubble. Extra copies stack. */
+  generator?: boolean;
 }
 
 export type ShopItem =

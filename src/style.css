@@ -299,6 +299,128 @@ h2 {
   background: linear-gradient(180deg, #f4fffd, #1aa89a 42%, #0c4f4a);
 }
 .cannon-face.medium.rear .breech { height: 52%; top: 18%; bottom: auto; }
+.cell.heavy-gun, .cell.robot, .cell.shield { z-index: 2; overflow: visible; }
+.cannon-face.heavy .barrel {
+  width: 52%;
+  height: 240%;
+  bottom: 62%;
+  border-radius: 2px 2px 0 0;
+  background: linear-gradient(90deg, #4a3514 0%, #e6c56a 30%, #fff6d0 48%, #c8963a 68%, #3a2a10 100%);
+}
+.cannon-face.heavy .barrel::before {
+  content: "";
+  position: absolute;
+  left: -22%;
+  right: -22%;
+  top: -7px;
+  height: 11px;
+  background: #241c10;
+  border: 2px solid var(--line);
+  border-radius: 2px;
+}
+.cannon-face.heavy .barrel::after {
+  content: "";
+  position: absolute;
+  left: -10%;
+  right: -10%;
+  top: 42%;
+  height: 7px;
+  background: #1a140c;
+  border-radius: 1px;
+}
+.cannon-face.heavy .breech {
+  height: 36%;
+  background: linear-gradient(180deg, #8a7040, #2c2416);
+  border: 2px solid var(--line);
+}
+.cannon-face.heavy.mid .sleeve {
+  position: absolute;
+  left: 26%;
+  right: 26%;
+  top: -30%;
+  bottom: -30%;
+  background: linear-gradient(90deg, #4a3514, #e6c56a 42%, #fff1c2 50%, #a07830 76%, #3a2a10);
+  border: 2px solid var(--line);
+}
+.cannon-face.heavy.mid .trunnion {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  top: 40%;
+  height: 18%;
+  background: #241c10;
+  border: 2px solid var(--line);
+}
+.cannon-face.heavy.rear .breech {
+  left: 10%;
+  right: 10%;
+  top: 16%;
+  bottom: 14%;
+  height: auto;
+}
+.cannon-face.heavy.rear .bolt {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f0d78a;
+  border: 2px solid var(--line);
+}
+.cannon-face.heavy.rear .bolt:first-of-type { left: 18%; top: 28%; }
+.cannon-face.heavy.rear .bolt:last-of-type { right: 18%; bottom: 26%; }
+.bay-face, .shield-face { position: absolute; inset: 0; pointer-events: none; }
+.bay-face .hatch {
+  position: absolute;
+  inset: 18%;
+  border: 2px solid #0e1116;
+  background: repeating-linear-gradient(135deg, #2a2c38 0 4px, #3c4050 4px 8px);
+}
+.bay-face .mini-hull {
+  position: absolute;
+  left: 22%;
+  right: 22%;
+  top: 34%;
+  height: 36%;
+  background: linear-gradient(180deg, #7d8ea3, #243044);
+  border: 2px solid #0e1116;
+  border-radius: 2px;
+  z-index: 1;
+}
+.bay-face .mini-barrel {
+  position: absolute;
+  left: 42%;
+  width: 16%;
+  top: 8%;
+  height: 36%;
+  background: linear-gradient(90deg, #1c6e66, #d8fff8 50%, #0c4f4a);
+  border: 2px solid #0e1116;
+  z-index: 2;
+}
+.shield-face .emitter {
+  position: absolute;
+  width: 168%;
+  height: 168%;
+  border: 4px solid #d8fff8;
+  border-radius: 50%;
+  box-shadow: 0 0 10px #88e8d8;
+  background: rgba(136, 232, 216, 0.16);
+}
+.shield-face.seg-nw .emitter { left: 16%; top: 16%; }
+.shield-face.seg-ne .emitter { right: 16%; top: 16%; }
+.shield-face.seg-sw .emitter { left: 16%; bottom: 16%; }
+.shield-face.seg-se .emitter { right: 16%; bottom: 16%; }
+.shield-face .core-glow {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #f0d050;
+  border: 2px solid #0e1116;
+  z-index: 1;
+}
+.swatch { position: relative; overflow: hidden; }
 .pots {
   position: absolute;
   left: 12%;

@@ -9,12 +9,15 @@ import {
   getHull,
   getModule,
   hullsFor,
+  hasTurret,
   isAnchorCell,
   isCoreCell,
   isTurretCell,
   moduleIdOf,
   modulesFor,
+  partRole,
   SHOP_ITEMS,
+  type PartRole,
 } from "./modules";
 import { activeLayout, purchase } from "./save";
 import { sfxTap } from "./sfx";
@@ -142,7 +145,7 @@ function buildStage(
   paint: () => void,
 ): HTMLElement {
   const stage = el("section", "builder");
-  stage.append(el("h2", undefined, "Hull"), hullPicker(save, persist, paint), artStyleToggle(paint), hint());
+  stage.append(el("h2", undefined, "Hull"), hullPicker(save, persist, paint), artStyleToggle(paint), hint(save.hull));
 
   const wrap = el("div", "tank-stage");
   wrap.append(el("div", "front-flag", "Front"));
@@ -162,7 +165,11 @@ function buildStage(
       if (turret) cell.classList.add("turret");
       if (isCoreCell(r, c, cols, rows, save.hull)) cell.classList.add("core");
       const anchor = isAnchorCell(token, r, c);
+      const role = partRole(token, r, c);
       if (mod?.id === "medium-cannon") cell.classList.add(anchor ? "medium-front" : "medium-rear");
+      else if (mod?.id === "heavy-cannon") cell.classList.add("heavy-gun", `seg-${role}`);
+      else if (mod?.id === "robot-bay") cell.classList.add("robot", `seg-${role}`);
+      else if (mod?.id === "shield-gen") cell.classList.add("shield", `seg-${role}`);
       else if (mod?.kind === "weapon") cell.classList.add("cannon");
       if (mod?.kind === "engine") cell.classList.add("engine");
       if (mod?.id === "heavy-armor") cell.classList.add("heavy");
@@ -184,7 +191,7 @@ function buildStage(
             : `${mod.name}, ${place}. Tap to replace.`
           : `Empty bay, ${place}. Tap to place.`,
       );
-      if (mod) cell.append(moduleFace(mod, mod.id === "medium-cannon" && !anchor ? "rear" : "front"));
+      if (mod) cell.append(moduleFace(mod, role));
       cell.addEventListener("click", () => {
         const board = activeLayout(save);
         if (!commitPlacement(board, save.hull, selected, r, c)) return;
@@ -213,11 +220,14 @@ function buildStage(
   return stage;
 }
 
-function hint(): HTMLElement {
+function hint(hull: string): HTMLElement {
+  const turret = hasTurret(hull)
+    ? "The gold 3×3 rotates toward your aim. Guns on the hull fire the way the hull faces."
+    : "This hull has no turret, so every gun fires the way the hull faces. Hold the aim stick to shoot.";
   return el(
     "p",
     "hint",
-    "Pick a block, tap a bay to place it. Tap the same block to pull it off, or a different one to replace it. A medium cannon takes the bay you tap and the one behind it — both on the hull or both inside the turret, and not on the core. The gold 3×3 rotates toward your aim. Guns on the hull fire the way the hull faces. A shot through a hole in the turret hits the core.",
+    `Pick a block, tap a bay to place it. Tap the same block to pull it off, or a different one to replace it. A long gun takes this bay and the cells behind it. A 2×2 part takes a square. Every cell has to sit on the hull or inside the turret, and a multi-cell part cannot cover the core. ${turret} A shot through an empty core bay hits the core.`,
   );
 }
 
@@ -244,13 +254,17 @@ function hullPicker(save: SaveData, persist: () => void, paint: () => void): HTM
   return picker;
 }
 
-function moduleFace(mod: ModuleDef, end: "front" | "rear" = "front"): HTMLElement {
+function moduleFace(mod: ModuleDef, role: PartRole = "single"): HTMLElement {
   if (readArtStyle() === "pixel") {
-    return mountSprite(mod.id, 5, { rear: mod.id === "medium-cannon" && end === "rear" });
+    const quad = role === "ne" ? 1 : role === "sw" ? 2 : role === "se" ? 3 : 0;
+    return mountSprite(mod.id, 5, { rear: role === "rear", mid: role === "mid", quad });
   }
+  if (mod.id === "heavy-cannon") return heavyFace(role);
+  if (mod.id === "robot-bay") return bayFace(role);
+  if (mod.id === "shield-gen") return shieldFace(role);
   if (mod.id === "medium-cannon") {
-    const face = el("span", end === "rear" ? "cannon-face medium rear" : "cannon-face medium");
-    if (end === "rear") face.append(el("span", "breech"));
+    const face = el("span", role === "rear" ? "cannon-face medium rear" : "cannon-face medium");
+    if (role === "rear") face.append(el("span", "breech"));
     else face.append(el("span", "barrel"), el("span", "breech"));
     return face;
   }
@@ -269,6 +283,38 @@ function moduleFace(mod: ModuleDef, end: "front" | "rear" = "front"): HTMLElemen
   const swatch = el("span", "cell-swatch");
   swatch.innerHTML = iconSvg(mod.kind, mod.id);
   return swatch;
+}
+
+function heavyFace(role: PartRole): HTMLElement {
+  if (role === "rear") {
+    const face = el("span", "cannon-face heavy rear");
+    const boltA = el("span", "bolt");
+    const boltB = el("span", "bolt");
+    face.append(el("span", "breech"), boltA, boltB);
+    return face;
+  }
+  if (role === "mid") {
+    const face = el("span", "cannon-face heavy mid");
+    face.append(el("span", "sleeve"), el("span", "trunnion"));
+    return face;
+  }
+  const face = el("span", "cannon-face heavy");
+  face.append(el("span", "barrel"), el("span", "breech"));
+  return face;
+}
+
+function bayFace(role: PartRole): HTMLElement {
+  const face = el("span", `bay-face seg-${role}`);
+  face.append(el("span", "hatch"));
+  if (role === "nw" || role === "single") face.append(el("span", "mini-hull"), el("span", "mini-barrel"));
+  return face;
+}
+
+function shieldFace(role: PartRole): HTMLElement {
+  const face = el("span", `shield-face seg-${role}`);
+  face.append(el("span", "emitter"));
+  if (role === "nw" || role === "single") face.append(el("span", "core-glow"));
+  return face;
 }
 
 function artStyleToggle(repaint: () => void): HTMLElement {
@@ -490,7 +536,7 @@ function shopCard(save: SaveData, item: ShopItem, persist: () => void, paint: ()
     }
     head.append(swatch);
   } else {
-    head.append(el("span", "swatch hull-mark", "Rear"));
+    head.append(el("span", "swatch hull-mark", getHull(id)?.mark ?? "Hull"));
   }
   const copy = el("div", "shop-copy");
   copy.append(el("h3", undefined, item.name), el("p", "shop-tagline", item.tagline));

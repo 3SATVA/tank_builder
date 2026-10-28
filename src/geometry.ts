@@ -21,6 +21,8 @@ export interface GunMount {
   col: number;
   life: number;
   heavy: boolean;
+  /** Three-cell cannon: slower shell, longer barrel. */
+  siege: boolean;
 }
 
 export function listGuns(grid: ReadonlyArray<ReadonlyArray<string | null>>, hull = "standard"): GunMount[] {
@@ -45,6 +47,7 @@ export function listGuns(grid: ReadonlyArray<ReadonlyArray<string | null>>, hull
         col,
         life: mod.shotLife ?? 1.25,
         heavy: (mod.rows ?? 1) > 1,
+        siege: (mod.rows ?? 1) >= 3,
       });
     }
   }

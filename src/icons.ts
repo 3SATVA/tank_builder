@@ -15,6 +15,11 @@ const BY_ID: Record<string, string> = {
     '<path d="M5 4h14v8c0 4-3 6.8-7 8.6C8 18.8 5 16 5 12V4z"/><path d="M8 8h.5M12 8h.5M16 8h.5M8 12h.5M12 12h.5M16 12h.5"/>',
   "repair-bay": '<path d="M12 4.5v15M4.5 12h15"/><circle cx="12" cy="12" r="3.2"/>',
   "medium-cannon": '<path d="M6 15h12v5.2H6z"/><path d="M9.2 15V2.8h5.6V15"/>',
+  "heavy-cannon":
+    '<path d="M6.2 16.2h11.6v5H6.2z"/><path d="M8 16.2V2.4h8V16.2"/><path d="M6.4 2.2h11.2v2.6H6.4z"/><path d="M8.6 7.2h6.8M8.6 11h6.8"/>',
+  "robot-bay":
+    '<rect x="3.5" y="3.5" width="17" height="17" rx="1"/><path d="M8 14.5h8v4.2H8z"/><path d="M10.6 14.5V8.2h2.8v6.3"/>',
+  "shield-gen": '<circle cx="12" cy="12" r="8"/><path d="M12 7.2v9.6M8.4 12h7.2"/>',
 };
 
 export function iconSvg(kind: ModuleKind, id?: string): string {

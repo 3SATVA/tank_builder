@@ -221,9 +221,197 @@ const BOOM = ["..AA..AA..", ".AWWAAWWA.", "AWFFWWFFWA", "AWWAAAWWWA", ".AWWWWWA.
 export interface SpriteOpts {
   flash?: boolean;
   puff?: boolean;
-  /** Rear half of a medium cannon: breech only, no barrel. */
+  /** Rear piece of a long cannon: breech only, no barrel. */
   rear?: boolean;
+  /** Middle piece of a three-cell cannon. */
+  mid?: boolean;
+  /** Quadrant of a 2×2 part: 0 nw, 1 ne, 2 sw, 3 se. */
+  quad?: number;
 }
+
+const HEAVY_FRONT = [
+  "...YYYY...",
+  "...YKKY...",
+  "..YYYYYY..",
+  "..YKKKKY..",
+  "..YYYYYY..",
+  "..YGGGGY..",
+  "..YYYYYY..",
+  "..YKKKKY..",
+  "..YYYYYY..",
+  "..YKKKKY..",
+  "..YYYYYY..",
+  "..YGGGGY..",
+  "..YYYYYY..",
+  "..YKKKKY..",
+  ".YYYYYYYY.",
+  ".YKKKKKKY.",
+  "KKYYYYYYKK",
+  "KYYYYYYYYK",
+  "TTTTTTTTTT",
+  "TWWWWWWWWT",
+  "TWTTTTTTWT",
+  "TWKKKKKKWT",
+  "TWK.GG.KWT",
+  "TWK....KWT",
+  "TWTTTTTTWT",
+  "TWWWWWWWWT",
+  "TttttttttT",
+  "tttttttttt",
+];
+
+const HEAVY_FLASH = [
+  "..AAAAAA..",
+  ".AFFFFFFA.",
+  "..YYYYYY..",
+  "..YKKKKY..",
+  "..YYYYYY..",
+  "..YGGGGY..",
+  "..YYYYYY..",
+  "..YKKKKY..",
+  "..YYYYYY..",
+  "..YKKKKY..",
+  "..YYYYYY..",
+  "..YGGGGY..",
+  "..YYYYYY..",
+  "..YKKKKY..",
+  ".YYYYYYYY.",
+  ".YKKKKKKY.",
+  "KKYYYYYYKK",
+  "KYYYYYYYYK",
+  "TTTTTTTTTT",
+  "TWWWWWWWWT",
+  "TWTTTTTTWT",
+  "TWKKKKKKWT",
+  "TWK.GG.KWT",
+  "TWK....KWT",
+  "TWTTTTTTWT",
+  "TWWWWWWWWT",
+  "TttttttttT",
+  "tttttttttt",
+];
+
+const HEAVY_MID = [
+  "..YYYYYY..",
+  "..YKKKKY..",
+  "..YYYYYY..",
+  "..YGGGGY..",
+  "KKYYYYYYKK",
+  "KTTTTTTTTK",
+  "KTWWWWWWKT",
+  "KTTTTTTTTK",
+  "KKYYYYYYKK",
+  "..YKKKKY..",
+];
+
+const HEAVY_REAR = [
+  "KKKKKKKKKK",
+  "KWWWWWWWWK",
+  "KWTTTTTTWK",
+  "KWTKKKKTWK",
+  "KWTKGGKTWK",
+  "KWTKGGKTWK",
+  "KWTKKKKTWK",
+  "KWTTTTTTWK",
+  "KWWWWWWWWK",
+  "KKKKKKKKKK",
+];
+
+const HEAVY_ICON = ["...YYYY...", "...YKKY...", "..YYYYYY..", "..YGGGGY..", "KKYYYYYYKK", "TTTTTTTTTT", "TWKKKKKKWT", "TWK.GG.KWT", "TWWWWWWWWT", "tttttttttt"];
+
+const ROBOT_QUADS = [
+  ["KKKKKKKKKK", "KIIIIIIIII", "KI........", "KI.KKKK...", "KI.KYYK...", "KI.KYYK...", "KI.KKKK...", "KI........", "KI.SSSS...", "KI.SKSK..."],
+  ["KKKKKKKKKK", "IIIIIIIIIK", "........IK", "...KKKK.IK", "...KYYK.IK", "...KYYK.IK", "...KKKK.IK", "........IK", "...SSSS.IK", "...KSKS.IK"],
+  ["KI.SSSS...", "KI.SKSK...", "KI........", "KI........", "KIIIIIIIII", "KIIIIIIIII", "KDDDDDDDDD", "KDDDDDDDDD", "KKKKKKKKKK", "KKKKKKKKKK"],
+  ["...SSSS.IK", "...KSKS.IK", "........IK", "........IK", "IIIIIIIIIK", "IIIIIIIIIK", "DDDDDDDDDK", "DDDDDDDDDK", "KKKKKKKKKK", "KKKKKKKKKK"],
+];
+
+const ROBOT_ICON = ["KKKKKKKKKK", "KIIIIIIIIK", "KI.KKKK.IK", "KI.KYYK.IK", "KI.KKKK.IK", "KI......IK", "KI.SSSS.IK", "KI.SKSK.IK", "KIIIIIIIIK", "KKKKKKKKKK"];
+
+const SHIELD_QUADS = [
+  ["BBBBBBBBBB", "BWWWWWWWWB", "BWBBBBBBBB", "BWBYYYYYYY", "BWBY......", "BWBY.BBBBB", "BWBY.BWWWW", "BWBY.BWYYY", "BWBY.BWYGG", "BWBY.BWYGG"],
+  ["BBBBBBBBBB", "BWWWWWWWWB", "BBBBBBBBWB", "YYYYYYYBWB", "......YBWB", "BBBBB.YBWB", "WWWWB.YBWB", "YYYWB.YBWB", "GGYWB.YBWB", "GGYWB.YBWB"],
+  ["BWBY.BWYGG", "BWBY.BWYGG", "BWBY.BWYYY", "BWBY.BWWWW", "BWBY.BBBBB", "BWBY......", "BWBYYYYYYY", "BWBBBBBBBB", "BDDDDDDDDB", "BBBBBBBBBB"],
+  ["GGYWB.YBWB", "GGYWB.YBWB", "YYYWB.YBWB", "WWWWB.YBWB", "BBBBB.YBWB", "......YBWB", "YYYYYYYBWB", "BBBBBBBBWB", "BDDDDDDDDB", "BBBBBBBBBB"],
+];
+
+const SHIELD_ICON = ["...BBBB...", "..BWWWWB..", ".BWYYYYWB.", ".BY....YB.", ".BY.GG.YB.", ".BY.GG.YB.", ".BY....YB.", ".BWYYYYWB.", "..BDDDDB..", "...BBBB..."];
+
+const DRONE = [
+  "....YYYY....",
+  "...YFFFFY...",
+  "....YYYY....",
+  "....YKKY....",
+  "...YYYYYY...",
+  "..KYYYYYYK..",
+  ".KKTTTTTTKK.",
+  "KTWWWWWWWWKT",
+  "KTWKKKKKKWKT",
+  "KTTTTTTTTTTK",
+  "KSKSKSKSKSKK",
+  "K..........K",
+  "KSKSKSKSKSKK",
+  "KKKKKKKKKKKK",
+  ".KK......KK.",
+  "..KKKKKKKK..",
+];
+
+const DRONE_FLASH = [
+  "...AAAAAA...",
+  "..AFFFFFFA..",
+  "....YYYY....",
+  "....YKKY....",
+  "...YYYYYY...",
+  "..KYYYYYYK..",
+  ".KKTTTTTTKK.",
+  "KTWWWWWWWWKT",
+  "KTWKKKKKKWKT",
+  "KTTTTTTTTTTK",
+  "KSKSKSKSKSKK",
+  "K..........K",
+  "KSKSKSKSKSKK",
+  "KKKKKKKKKKKK",
+  ".KK......KK.",
+  "..KKKKKKKK..",
+];
+
+const DRONE_RIVAL = [
+  "....OOOO....",
+  "...OFFFFO...",
+  "....OOOO....",
+  "....OKKO....",
+  "...OOOOOO...",
+  "..KOOOOOOK..",
+  ".KKRRRRRRKK.",
+  "KRWWWWWWWWKR",
+  "KRWKKKKKKWKR",
+  "KRRRRRRRRRRK",
+  "KSKSKSKSKSKK",
+  "K..........K",
+  "KSKSKSKSKSKK",
+  "KKKKKKKKKKKK",
+  ".KK......KK.",
+  "..KKKKKKKK..",
+];
+
+const DRONE_RIVAL_FLASH = [
+  "...AAAAAA...",
+  "..AFFFFFFA..",
+  "....OOOO....",
+  "....OKKO....",
+  "...OOOOOO...",
+  "..KOOOOOOK..",
+  ".KKRRRRRRKK.",
+  "KRWWWWWWWWKR",
+  "KRWKKKKKKWKR",
+  "KRRRRRRRRRRK",
+  "KSKSKSKSKSKK",
+  "K..........K",
+  "KSKSKSKSKSKK",
+  "KKKKKKKKKKKK",
+  ".KK......KK.",
+  "..KKKKKKKK..",
+];
 
 export function moduleArt(id: string, opts: SpriteOpts = {}): HTMLCanvasElement {
   if (id === "heavy-armor") return bake(HEAVY, "heavy");
@@ -232,6 +420,13 @@ export function moduleArt(id: string, opts: SpriteOpts = {}): HTMLCanvasElement 
     if (opts.rear) return bake(BREECH, "breech");
     return bake(opts.flash ? MEDIUM_FLASH : MEDIUM, opts.flash ? "med-flash" : "med");
   }
+  if (id === "heavy-cannon") {
+    if (opts.rear) return bake(HEAVY_REAR, "hvy-rear");
+    if (opts.mid) return bake(HEAVY_MID, "hvy-mid");
+    return bake(opts.flash ? HEAVY_FLASH : HEAVY_FRONT, opts.flash ? "hvy-flash" : "hvy");
+  }
+  if (id === "robot-bay") return bake(ROBOT_QUADS[opts.quad ?? 0] ?? ROBOT_QUADS[0], `robot-${opts.quad ?? 0}`);
+  if (id === "shield-gen") return bake(SHIELD_QUADS[opts.quad ?? 0] ?? SHIELD_QUADS[0], `shield-${opts.quad ?? 0}`);
   if (id === "cannon") return bake(opts.flash ? CANNON_FLASH : CANNON, opts.flash ? "can-flash" : "can");
   if (id === "engine") return bake(opts.puff ? ENGINE_PUFF : ENGINE, opts.puff ? "eng-puff" : "eng");
   if (id === "fuel") return bake(FUEL, "fuel");
@@ -603,7 +798,15 @@ export function boomArt(): HTMLCanvasElement {
 }
 
 /** Bottom block of a sprite, without a barrel that sticks out of the cell. */
+export function droneArt(side: "player" | "rival", flash = false): HTMLCanvasElement {
+  if (side === "rival") return bake(flash ? DRONE_RIVAL_FLASH : DRONE_RIVAL, flash ? "drone-r-flash" : "drone-r");
+  return bake(flash ? DRONE_FLASH : DRONE, flash ? "drone-flash" : "drone");
+}
+
 export function bodyArt(id: string): HTMLCanvasElement {
+  if (id === "heavy-cannon") return bake(HEAVY_ICON, "hvy-icon");
+  if (id === "robot-bay") return bake(ROBOT_ICON, "robot-icon");
+  if (id === "shield-gen") return bake(SHIELD_ICON, "shield-icon");
   const full = moduleArt(id, { rear: id === "medium-cannon" });
   if (full.height <= CELL_ART) return full;
   const key = `body-${id}`;

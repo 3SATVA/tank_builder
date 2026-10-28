@@ -1,4 +1,4 @@
-import { cloneGrid, createDefaultGrid, getHull, getModule, GRID_COLS, GRID_ROWS, moduleIdOf } from "./modules";
+import { cloneGrid, createDefaultGrid, getHull, getModule, hullSize, moduleIdOf } from "./modules";
 import type { SaveData, ShopItem } from "./types";
 
 const KEY = "tank-builder-save-v4";
@@ -16,9 +16,9 @@ function blank(currency = 0, unlocked: string[] = []): SaveData {
 }
 
 function isGrid(value: unknown): value is (string | null)[][] {
-  if (!Array.isArray(value) || value.length === 0 || value.length > 8) return false;
+  if (!Array.isArray(value) || value.length === 0 || value.length > 10) return false;
   const width = Array.isArray(value[0]) ? value[0].length : 0;
-  if (width < 1 || width > 8) return false;
+  if (width < 1 || width > 10) return false;
   return value.every(
     (row) =>
       Array.isArray(row) &&
@@ -27,8 +27,9 @@ function isGrid(value: unknown): value is (string | null)[][] {
   );
 }
 
-function fitsCurrentTank(grid: (string | null)[][]): boolean {
-  return grid.length === GRID_ROWS && grid[0]?.length === GRID_COLS;
+function fitsHull(grid: (string | null)[][], hullId: string): boolean {
+  const size = hullSize(hullId);
+  return grid.length === size.rows && grid[0]?.length === size.cols;
 }
 
 function cleanGrid(grid: (string | null)[][]): (string | null)[][] {
@@ -66,8 +67,8 @@ function readBots(raw: { botsBeaten?: unknown } | null): number {
   return Math.max(0, Math.min(3, value));
 }
 
-function layoutFrom(value: unknown): (string | null)[][] | null {
-  if (!isGrid(value) || !fitsCurrentTank(value)) return null;
+function layoutFrom(value: unknown, hullId: string): (string | null)[][] | null {
+  if (!isGrid(value) || !fitsHull(value, hullId)) return null;
   return cleanGrid(value);
 }
 
@@ -78,12 +79,12 @@ function sanitize(raw: RawSave | null): SaveData {
   if (raw && raw.layouts && typeof raw.layouts === "object") {
     for (const [id, grid] of Object.entries(raw.layouts as Record<string, unknown>)) {
       if (!ownsHull(id, unlocked)) continue;
-      const clean = layoutFrom(grid);
+      const clean = layoutFrom(grid, id);
       if (clean) layouts[id] = clean;
     }
   }
   if (!layouts.standard) {
-    const legacy = raw ? layoutFrom(raw.grid) : null;
+    const legacy = raw ? layoutFrom(raw.grid, "standard") : null;
     layouts.standard = legacy ?? createDefaultGrid("standard");
   }
   let hull = typeof raw?.hull === "string" && ownsHull(raw.hull, unlocked) ? raw.hull : "standard";
@@ -96,7 +97,7 @@ function sanitize(raw: RawSave | null): SaveData {
 
 export function activeLayout(save: SaveData): (string | null)[][] {
   const grid = save.layouts[save.hull];
-  if (grid && fitsCurrentTank(grid)) return grid;
+  if (grid && fitsHull(grid, save.hull)) return grid;
   const fresh = createDefaultGrid(save.hull);
   save.layouts[save.hull] = fresh;
   return fresh;
@@ -117,7 +118,7 @@ export function loadSave(): SaveData {
       if (!legacy) continue;
       const parsed = JSON.parse(legacy) as RawSave;
       const migrated = sanitize(parsed);
-      const kept = layoutFrom(parsed.grid);
+      const kept = layoutFrom(parsed.grid, "standard");
       migrated.hull = "standard";
       migrated.layouts = { standard: kept ?? createDefaultGrid("standard") };
       migrated.botsBeaten = readBots(parsed);
