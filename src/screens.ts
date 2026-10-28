@@ -1,6 +1,6 @@
 import { BOTS, botOpen } from "./bots";
 import { el } from "./dom";
-import { canPlace, placeModule, removeInstance } from "./grid";
+import { commitPlacement } from "./grid";
 import { iconSvg } from "./icons";
 import {
   createDefaultGrid,
@@ -179,16 +179,13 @@ function buildStage(
         mod
           ? mod.id === selected
             ? `${mod.name}, ${place}. Tap to remove.`
-            : `${mod.name}, ${place}.`
+            : `${mod.name}, ${place}. Tap to replace.`
           : `Empty bay, ${place}. Tap to place.`,
       );
       if (mod) cell.append(moduleFace(mod, mod.id === "medium-cannon" && !anchor ? "rear" : "front"));
       cell.addEventListener("click", () => {
         const board = activeLayout(save);
-        const currentId = moduleIdOf(board[r][c]);
-        if (currentId === selected) removeInstance(board, r, c);
-        else if (canPlace(board, save.hull, selected, r, c)) placeModule(board, selected, r, c);
-        else return;
+        if (!commitPlacement(board, save.hull, selected, r, c)) return;
         sfxTap();
         persist();
         paint();
@@ -218,7 +215,7 @@ function hint(): HTMLElement {
   return el(
     "p",
     "hint",
-    "Pick a block, tap a bay to place it. Tap a bay that already holds that block to pull it off. A medium cannon fills the bay you tap and the one behind it — both empty, and both on the hull or both inside the turret. The gold 3×3 rotates toward your aim. Guns on the hull fire the way the hull faces. A shot through a hole in the turret hits the core.",
+    "Pick a block, tap a bay to place it. Tap the same block to pull it off, or a different one to replace it. A medium cannon takes the bay you tap and the one behind it — both on the hull or both inside the turret, and not on the core. The gold 3×3 rotates toward your aim. Guns on the hull fire the way the hull faces. A shot through a hole in the turret hits the core.",
   );
 }
 

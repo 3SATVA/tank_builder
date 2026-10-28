@@ -561,6 +561,32 @@ h2 {
   text-shadow: 0 2px 0 #0e1116;
 }
 .battle-status[hidden] { display: none; }
+.map-banner {
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  top: 46%;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  padding: 12px 22px;
+  background: rgba(16, 19, 26, 0.88);
+  border: 3px solid var(--line);
+  border-radius: 14px;
+  font-size: 1.7rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  pointer-events: none;
+  opacity: 0;
+}
+.map-banner.is-on { animation: map-banner 2.6s ease forwards; }
+.map-banner[hidden] { display: none; }
+@keyframes map-banner {
+  0% { opacity: 0; }
+  14% { opacity: 1; }
+  68% { opacity: 1; }
+  100% { opacity: 0; }
+}
 
 .joystick, .joystick-base {
   touch-action: none;
@@ -674,4 +700,5 @@ h2 {
 @media (prefers-reduced-motion: reduce) {
   .btn:active { transform: none; }
   .pot, .puff { animation: none; }
+  .map-banner.is-on { animation: none; opacity: 1; }
 }

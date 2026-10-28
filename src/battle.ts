@@ -4,6 +4,7 @@ import { CELL, cellCenter, listGuns } from "./geometry";
 import { applyRepair, damageInstance, nextRepair } from "./grid";
 import { attachInput, type InputController } from "./input";
 import { clamp, localToWorld, rotateToward, traceRoundRect, worldToLocal } from "./math";
+import { hitsBlock, hitsHazard, pickMap, resolveTank, TILE, type ArenaMap, type MapBlock } from "./maps";
 import {
   blockPlate,
   cloneGrid,
@@ -20,21 +21,8 @@ import { sfxBoom, sfxHit, sfxShot } from "./sfx";
 import { computeStats, fuelDrainPerSecond, maxDriveSpeed, maxTurnRate } from "./stats";
 import type { ModuleKind } from "./types";
 
-const ARENA_W = 2000;
-const ARENA_H = 1400;
 const TURRET_TURN = 4.6;
-
-interface Pillar {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-
-const PILLARS: readonly Pillar[] = [
-  { x: 180, y: 600, w: 120, h: 180 },
-  { x: 1700, y: 600, w: 120, h: 180 },
-];
+const LAVA_DPS = 18;
 
 type Side = "player" | "rival";
 
@@ -128,6 +116,7 @@ interface TankDebug {
   rivalTurret: number;
   rivalX: number;
   rivalY: number;
+  map: string;
   lastVolley: Array<{ mount: "hull" | "turret"; angle: number }>;
 }
 
@@ -145,9 +134,10 @@ declare global {
  */
 export function mountBattle(root: HTMLElement, options: BattleOptions): () => void {
   const playerBlueprint = options.grid.length >= 3 ? options.grid : createDefaultGrid();
+  const map: ArenaMap = pickMap();
   const canvas = el("canvas");
   canvas.id = "battle-canvas";
-  canvas.setAttribute("aria-label", "Duel arena");
+  canvas.setAttribute("aria-label", `${map.name} arena`);
 
   const hud = el("div", "hud");
   const exit = el("button", "btn btn-ghost hud-exit", "Menu");
@@ -185,6 +175,10 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   const moveStick = joystick("move", "Move", "Move. Up and down drive. Left and right turn.");
   const aimStick = joystick("aim", "Aim", "Aim. Spins the turret and fires while held.");
 
+  const banner = el("p", "map-banner");
+  banner.setAttribute("aria-live", "polite");
+  let bannerTimer = 0;
+
   const endcard = el("div", "endcard");
   endcard.hidden = true;
   const endTitle = el("h2", undefined, "");
@@ -201,7 +195,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   endPanel.append(endTitle, endCopy, endActions);
   endcard.append(endPanel);
 
-  root.append(canvas, hud, help, status, moveStick.root, aimStick.root, endcard);
+  root.append(canvas, hud, help, status, banner, moveStick.root, aimStick.root, endcard);
 
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas unavailable");
@@ -220,16 +214,28 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   let lastTime = 0;
   let stopped = false;
   let acc = 0;
-  let player = spawnTank("player", "You", playerBlueprint, 1000, 1080, 0, options.hull);
-  let rival = spawnTank("rival", options.rivalName, options.rivalGrid, 1040, 380, Math.PI, options.rivalHull);
+  let player = spawnTank("player", "You", playerBlueprint, map.spawnA.x, map.spawnA.y, 0, options.hull);
+  let rival = spawnTank("rival", options.rivalName, options.rivalGrid, map.spawnB.x, map.spawnB.y, Math.PI, options.rivalHull);
   let shots: Shot[] = [];
   let particles: Particle[] = [];
   let floaters: Floater[] = [];
   let lastVolley: TankDebug["lastVolley"] = [];
 
+  function showMapTitle(): void {
+    banner.hidden = false;
+    banner.textContent = map.name;
+    banner.classList.remove("is-on");
+    void banner.offsetWidth;
+    banner.classList.add("is-on");
+    window.clearTimeout(bannerTimer);
+    bannerTimer = window.setTimeout(() => {
+      banner.hidden = true;
+    }, 2600);
+  }
+
   function boot(): void {
-    player = spawnTank("player", "You", playerBlueprint, 1000, 1080, 0, options.hull);
-    rival = spawnTank("rival", options.rivalName, options.rivalGrid, 1040, 380, Math.PI, options.rivalHull);
+    player = spawnTank("player", "You", playerBlueprint, map.spawnA.x, map.spawnA.y, 0, options.hull);
+    rival = spawnTank("rival", options.rivalName, options.rivalGrid, map.spawnB.x, map.spawnB.y, Math.PI, options.rivalHull);
     shots = [];
     particles = [];
     floaters = [];
@@ -237,6 +243,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     phase = "play";
     paid = false;
     endcard.hidden = true;
+    showMapTitle();
     syncHud();
   }
 
@@ -245,12 +252,19 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     const rivalCmd = rivalAi.commands({
       self: rival,
       foe: player,
-      arena: { w: ARENA_W, h: ARENA_H },
+      arena: map,
       incoming: shots.filter((shot) => shot.owner !== "rival").map(shotView),
       dt,
     });
     stepTank(player, playerCmd, dt);
     stepTank(rival, rivalCmd, dt);
+    if (defeated(player)) finish("lose");
+    else if (defeated(rival)) finish("win");
+    if (phase !== "play") {
+      stepDecor(dt);
+      syncHud();
+      return;
+    }
     separateTanks();
 
     for (let i = shots.length - 1; i >= 0; i -= 1) {
@@ -258,7 +272,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       shot.x += shot.vx * dt;
       shot.y += shot.vy * dt;
       shot.life -= dt;
-      if (shot.life <= 0 || shot.x < 0 || shot.y < 0 || shot.x > ARENA_W || shot.y > ARENA_H || shotHitsPillar(shot)) {
+      if (shot.life <= 0 || shot.x < -20 || shot.y < -20 || shot.x > map.w + 20 || shot.y > map.h + 20 || hitsBlock(map, shot.x, shot.y, shot.r)) {
         shots.splice(i, 1);
         continue;
       }
@@ -293,9 +307,13 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     tank.x += tank.vx * dt;
     tank.y += tank.vy * dt;
     tank.angle += cmd.turn * maxTurnRate(stats) * dt;
-    const solved = resolveCircle(tank.x, tank.y, tank.radius);
+    const solved = resolveTank(map, tank.x, tank.y, tank.radius);
     tank.x = solved.x;
     tank.y = solved.y;
+    if (hitsHazard(map, tank.x, tank.y, tank.radius * 0.72)) {
+      tank.core -= LAVA_DPS * dt;
+      tank.flash = Math.max(tank.flash, 0.1);
+    }
     if (cmd.aimAngle !== null) tank.turret = rotateToward(tank.turret, cmd.aimAngle, TURRET_TURN * dt);
     tank.flash = Math.max(0, tank.flash - dt);
     tank.muzzle = Math.max(0, tank.muzzle - dt);
@@ -436,35 +454,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       (-view.camX + jx) * view.dpr * view.zoom,
       (-view.camY + jy) * view.dpr * view.zoom,
     );
-    context.fillStyle = "#10141c";
-    context.fillRect(-400, -400, ARENA_W + 800, ARENA_H + 800);
-    context.fillStyle = "#1b2333";
-    context.fillRect(0, 0, ARENA_W, ARENA_H);
-    context.strokeStyle = "rgba(255,255,255,0.045)";
-    context.lineWidth = 2;
-    for (let x = 0; x <= ARENA_W; x += 64) {
-      context.beginPath();
-      context.moveTo(x, 0);
-      context.lineTo(x, ARENA_H);
-      context.stroke();
-    }
-    for (let y = 0; y <= ARENA_H; y += 64) {
-      context.beginPath();
-      context.moveTo(0, y);
-      context.lineTo(ARENA_W, y);
-      context.stroke();
-    }
-    context.strokeStyle = "#465064";
-    context.lineWidth = 16;
-    context.strokeRect(8, 8, ARENA_W - 16, ARENA_H - 16);
-    for (const pillar of PILLARS) {
-      traceRoundRect(context, pillar.x, pillar.y, pillar.w, pillar.h, 8);
-      context.fillStyle = "#2c3546";
-      context.fill();
-      context.strokeStyle = "#0e1116";
-      context.lineWidth = 4;
-      context.stroke();
-    }
+    drawArena();
     drawTank(rival, "#5a2430");
     drawTank(player, "#2a3142");
     for (const shot of shots) {
@@ -496,6 +486,111 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       context.fillText(floater.text, floater.x, floater.y);
       context.globalAlpha = 1;
     }
+  }
+
+  function drawArena(): void {
+    context.fillStyle = "#10141c";
+    context.fillRect(-900, -900, map.w + 1800, map.h + 1800);
+    const cols = Math.round(map.w / TILE);
+    const rows = Math.round(map.h / TILE);
+    for (let r = 0; r < rows; r += 1) {
+      for (let c = 0; c < cols; c += 1) {
+        context.fillStyle = (c + r) % 2 === 0 ? map.ground : map.alt;
+        context.fillRect(c * TILE, r * TILE, TILE, TILE);
+        const n = (Math.imul(c + r * 17 + map.w, 1103515245) + 12345) >>> 16;
+        if ((n & 3) === 0) {
+          context.fillStyle = "rgba(0,0,0,0.16)";
+          context.fillRect(c * TILE + (n & 15), r * TILE + ((n >> 4) & 15), 7, 7);
+        }
+      }
+    }
+    for (const pool of map.hazards) drawLava(pool);
+    for (const block of map.blocks) drawCover(block);
+    context.strokeStyle = map.edge;
+    context.lineWidth = 10;
+    context.strokeRect(5, 5, map.w - 10, map.h - 10);
+  }
+
+  function drawCover(block: MapBlock): void {
+    const { x, y, w, h, kind, color } = block;
+    context.fillStyle = color;
+    context.fillRect(x, y, w, h);
+    context.strokeStyle = "#0e1116";
+    context.lineWidth = 3;
+    context.strokeRect(x + 1.5, y + 1.5, w - 3, h - 3);
+    if (kind === "H") {
+      context.fillStyle = "#8a6a32";
+      context.fillRect(x + 4, y + 8, w - 8, 5);
+      context.fillRect(x + 4, y + 18, w - 8, 5);
+    } else if (kind === "R" || kind === "P" || kind === "#") {
+      context.fillStyle = "rgba(0,0,0,0.28)";
+      context.fillRect(x + 6, y + 6, 10, 10);
+      context.fillRect(x + w - 14, y + h - 14, 8, 8);
+    } else if (kind === "K") {
+      context.fillStyle = "#8a8478";
+      context.fillRect(x + 3, y + 3, 6, 6);
+      context.fillRect(x + w / 2 - 3, y + 3, 6, 6);
+      context.fillRect(x + w - 9, y + 3, 6, 6);
+    } else if (kind === "T") {
+      context.fillStyle = "#4a4038";
+      context.fillRect(x + w / 2 - 2, y + 6, 4, h - 14);
+      context.fillRect(x + 8, y + 10, w - 16, 4);
+    } else if (kind === "C") {
+      context.fillStyle = "#1a1614";
+      context.fillRect(x + 10, y + 12, w - 20, h - 16);
+      context.fillStyle = "#cfc6b8";
+      context.fillRect(x + 4, y + 4, w - 8, 5);
+    } else if (kind === "Y") {
+      context.fillStyle = "#241810";
+      context.fillRect(x + w / 2 - 3, y + 6, 6, h - 8);
+      context.fillRect(x + 6, y + 8, w - 12, 5);
+      context.fillRect(x + 8, y + 16, w - 16, 4);
+    } else if (kind === "F") {
+      context.fillStyle = "#c5ccd4";
+      context.fillRect(x + 5, y + 4, 3, h - 8);
+      context.fillRect(x + w / 2 - 1, y + 4, 3, h - 8);
+      context.fillRect(x + w - 8, y + 4, 3, h - 8);
+      context.fillRect(x + 4, y + 8, w - 8, 3);
+    } else if (kind === "U" || kind === "N") {
+      context.fillStyle = kind === "U" ? "#6e2f22" : "#8d7d62";
+      context.fillRect(x, y, w, 9);
+      context.fillStyle = "#f6f1e6";
+      context.fillRect(x + 6, y + 14, 7, 7);
+      context.fillRect(x + w - 13, y + 14, 7, 7);
+    } else if (kind === "X") {
+      context.fillStyle = "#8a5a22";
+      context.fillRect(x + 4, y + w / 2 - 2, w - 8, 4);
+      context.fillRect(x + w / 2 - 2, y + 4, 4, h - 8);
+    } else if (kind === "S") {
+      context.fillStyle = "#c4a15a";
+      context.fillRect(x + 4, y + 6, 12, 8);
+      context.fillStyle = "#4a4038";
+      context.fillRect(x + 14, y + 14, 12, 10);
+    } else if (kind === "V" || kind === "D") {
+      context.fillStyle = "#141820";
+      context.fillRect(x + 3, y + h - 10, 8, 7);
+      context.fillRect(x + w - 11, y + h - 10, 8, 7);
+      context.fillStyle = "#d7e2ea";
+      context.fillRect(x + 7, y + 6, w - 14, 8);
+    } else if (kind === "I") {
+      context.fillStyle = "#2a2a2a";
+      context.fillRect(x + 5, y + 4, w - 10, 7);
+      context.fillRect(x + 5, y + 13, w - 10, 7);
+      context.fillRect(x + 5, y + 22, w - 10, 6);
+      context.fillStyle = "#5c5346";
+      context.fillRect(x + 12, y + 5, 8, 5);
+      context.fillRect(x + 12, y + 14, 8, 5);
+    }
+  }
+
+  function drawLava(block: MapBlock): void {
+    context.fillStyle = block.color;
+    context.fillRect(block.x, block.y, block.w, block.h);
+    const flicker = reduceMotion ? 0 : Math.sin(simTime * 5 + block.x * 0.08) * 2;
+    context.fillStyle = "#ffba08";
+    context.fillRect(block.x + 7, block.y + 7 + flicker * 0.15, block.w - 14, block.h - 14);
+    context.fillStyle = "#fff3bf";
+    context.fillRect(block.x + 13, block.y + 13, 6, 6);
   }
 
   function drawTank(tank: Tank, chassis: string): void {
@@ -779,16 +874,13 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     }
     const viewW = Math.max(1, rect.width);
     const viewH = Math.max(1, rect.height);
-    const dist = Math.hypot(player.x - rival.x, player.y - rival.y);
-    const focus = clamp(dist + 380, 620, 1040);
-    const zoom = Math.min(viewW, viewH) / focus;
-    const midX = (player.x + rival.x) / 2;
-    const midY = (player.y + rival.y) / 2;
-    const thumbBias = viewH > viewW ? 36 : 0;
-    let camX = midX - viewW / (2 * zoom);
-    let camY = midY - (viewH / 2 - thumbBias) / zoom;
-    camX = clamp(camX, -160, ARENA_W - viewW / zoom + 160);
-    camY = clamp(camY, -160, ARENA_H - viewH / zoom + 160);
+    const portrait = viewH > viewW;
+    const padX = 36;
+    const padY = portrait ? 220 : 80;
+    const zoom = Math.min(viewW / (map.w + padX * 2), viewH / (map.h + padY));
+    const lookY = map.h / 2 + (portrait ? 24 : 0);
+    const camX = map.w / 2 - viewW / (2 * zoom);
+    const camY = lookY - viewH / (2 * zoom);
     return { zoom, camX, camY, dpr, rect };
   }
 
@@ -899,6 +991,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       rivalTurret: rival.turret,
       rivalX: rival.x,
       rivalY: rival.y,
+      map: map.id,
       lastVolley,
     });
   }
@@ -912,6 +1005,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     cancelAnimationFrame(raf);
     input.destroy();
     window.removeEventListener("keydown", onKey);
+    window.clearTimeout(bannerTimer);
     if (import.meta.env.DEV && window.__TANK_DEBUG__) delete window.__TANK_DEBUG__;
   };
 
@@ -924,8 +1018,8 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     const push = (min - dist) / 2;
     const nx = dx / dist;
     const ny = dy / dist;
-    const a = resolveCircle(player.x - nx * push, player.y - ny * push, player.radius);
-    const b = resolveCircle(rival.x + nx * push, rival.y + ny * push, rival.radius);
+    const a = resolveTank(map, player.x - nx * push, player.y - ny * push, player.radius);
+    const b = resolveTank(map, rival.x + nx * push, rival.y + ny * push, rival.radius);
     player.x = a.x;
     player.y = a.y;
     rival.x = b.x;
@@ -1106,45 +1200,3 @@ function joystick(kind: "move" | "aim", label: string, aria: string): {
   return { root, base, knob };
 }
 
-function resolveCircle(x: number, y: number, r: number): { x: number; y: number } {
-  let px = x;
-  let py = y;
-  for (let pass = 0; pass < 2; pass += 1) {
-    px = clamp(px, r, ARENA_W - r);
-    py = clamp(py, r, ARENA_H - r);
-    for (const pillar of PILLARS) {
-      const nearestX = clamp(px, pillar.x, pillar.x + pillar.w);
-      const nearestY = clamp(py, pillar.y, pillar.y + pillar.h);
-      const dx = px - nearestX;
-      const dy = py - nearestY;
-      const distSq = dx * dx + dy * dy;
-      if (distSq >= r * r) continue;
-      if (distSq < 1e-6) {
-        const left = px - pillar.x;
-        const right = pillar.x + pillar.w - px;
-        const top = py - pillar.y;
-        const bottom = pillar.y + pillar.h - py;
-        const min = Math.min(left, right, top, bottom);
-        if (min === left) px = pillar.x - r;
-        else if (min === right) px = pillar.x + pillar.w + r;
-        else if (min === top) py = pillar.y - r;
-        else py = pillar.y + pillar.h + r;
-        continue;
-      }
-      const dist = Math.sqrt(distSq);
-      px += (dx / dist) * (r - dist + 0.25);
-      py += (dy / dist) * (r - dist + 0.25);
-    }
-  }
-  return { x: clamp(px, r, ARENA_W - r), y: clamp(py, r, ARENA_H - r) };
-}
-
-function shotHitsPillar(shot: Shot): boolean {
-  return PILLARS.some(
-    (pillar) =>
-      shot.x > pillar.x - shot.r &&
-      shot.x < pillar.x + pillar.w + shot.r &&
-      shot.y > pillar.y - shot.r &&
-      shot.y < pillar.y + pillar.h + shot.r,
-  );
-}

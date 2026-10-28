@@ -1,4 +1,4 @@
-import { blockPlate, getModule, isTurretCell, moduleIdOf } from "./modules";
+import { blockPlate, getModule, isCoreCell, isTurretCell, moduleIdOf } from "./modules";
 
 export type Grid = (string | null)[][];
 
@@ -38,6 +38,37 @@ export function canPlace(grid: Grid, hull: string, moduleId: string, row: number
   const flags = cells.map((cell) => isTurretCell(cell.r, cell.c, cols, rows, hull));
   const onTurret = flags.some(Boolean);
   return !onTurret || flags.every(Boolean);
+}
+
+/**
+ * Place `moduleId` on the tapped cell, swapping out whatever is already there.
+ * The same block type still comes off. A multi-cell part has to sit entirely on
+ * the hull or entirely inside the turret, and it cannot cover the core cell.
+ * Overlapping an existing multi-cell part removes that whole part first.
+ */
+export function commitPlacement(grid: Grid, hull: string, moduleId: string, row: number, col: number): boolean {
+  if (!getModule(moduleId)) return false;
+  const current = moduleIdOf(grid[row]?.[col] ?? null);
+  if (current === moduleId) {
+    removeInstance(grid, row, col);
+    return true;
+  }
+  const cells = footprint(moduleId, row, col);
+  const rows = grid.length;
+  const cols = grid[0]?.length ?? 0;
+  if (cells.some((cell) => cell.r < 0 || cell.c < 0 || cell.r >= rows || cell.c >= cols)) return false;
+  const flags = cells.map((cell) => isTurretCell(cell.r, cell.c, cols, rows, hull));
+  if (flags.some(Boolean) && !flags.every(Boolean)) return false;
+  if (cells.length > 1 && cells.some((cell) => isCoreCell(cell.r, cell.c, cols, rows, hull))) return false;
+  const seen = new Set<string>();
+  for (const cell of cells) {
+    const token = grid[cell.r][cell.c];
+    if (!token || seen.has(token)) continue;
+    seen.add(token);
+    removeInstance(grid, cell.r, cell.c);
+  }
+  placeModule(grid, moduleId, row, col);
+  return true;
 }
 
 export function placeModule(grid: Grid, moduleId: string, row: number, col: number): void {
