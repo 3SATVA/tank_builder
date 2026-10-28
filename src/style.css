@@ -573,9 +573,73 @@ h2 {
   flex-direction: column;
   align-items: stretch;
   gap: 14px;
-  width: min(560px, 100%);
+  width: min(420px, 100%);
+  margin: 0 auto;
 }
 .pvp-body .btn-primary { align-self: stretch; }
+.pvp-identity {
+  text-align: center;
+  font-weight: 800;
+  font-size: 1.05rem;
+}
+.tank-preview { width: min(100%, 300px); margin: 0 auto; }
+.battle-go { min-height: 76px; font-size: 1.2rem; width: 100%; }
+.tab-bar {
+  position: fixed;
+  z-index: 40;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  gap: 6px;
+  padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+  background: #161b24;
+  border-top: 3px solid #0e1116;
+}
+.tab {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 68px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 2px;
+  border: 3px solid transparent;
+  border-radius: 16px;
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  line-height: 1.15;
+}
+.tab-icon {
+  font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
+  font-size: 1.45rem;
+  line-height: 1;
+  text-transform: none;
+}
+.tab-label { text-align: center; }
+.tab.selected {
+  background: var(--amber);
+  color: #141820;
+  border-color: #0e1116;
+  box-shadow: 0 4px 0 #0e1116;
+}
+.tab:active { transform: translateY(2px); }
+body.in-battle .tab-bar { display: none; }
+.screen:not(.battle-screen) {
+  padding-bottom: calc(112px + env(safe-area-inset-bottom));
+}
+@media (max-width: 520px) {
+  .screen:not(.battle-screen) { gap: 10px; }
+  .builder { gap: 8px; }
+  .tank-grid { padding: 16px 8px 10px; gap: 4px; }
+}
 .callsign-form { display: grid; gap: 10px; width: min(560px, 100%); }
 .callsign-input {
   width: 100%;
@@ -989,6 +1053,8 @@ html[data-art="pixel"] .stats-panel,
 html[data-art="pixel"] .palette,
 html[data-art="pixel"] .shop-card,
 html[data-art="pixel"] .callsign-input,
+html[data-art="pixel"] .tab,
+html[data-art="pixel"] .tab-bar,
 html[data-art="pixel"] .no-power,
 html[data-art="pixel"] .no-power::after,
 html[data-art="pixel"] .board-row,
@@ -1010,6 +1076,13 @@ html[data-art="pixel"] .pixel-sprite {
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 }
+html[data-art="pixel"] .tab-icon {
+  font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
+  font-size: 18px;
+  line-height: 1;
+}
+html[data-art="pixel"] .tab-label { font-size: 7px; letter-spacing: 0; }
+html[data-art="pixel"] .battle-go { font-size: 11px; }
 html[data-art="pixel"] .no-power::after { transform: none; }
 html[data-art="pixel"] .joystick-base {
   background: #1c1a28;
