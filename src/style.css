@@ -635,6 +635,11 @@ body.in-battle .tab-bar { display: none; }
 .screen:not(.battle-screen) {
   padding-bottom: calc(112px + env(safe-area-inset-bottom));
 }
+@media (max-width: 520px) {
+  .screen:not(.battle-screen) { gap: 10px; }
+  .builder { gap: 8px; }
+  .tank-grid { padding: 16px 8px 10px; gap: 4px; }
+}
 .callsign-form { display: grid; gap: 10px; width: min(560px, 100%); }
 .callsign-input {
   width: 100%;
