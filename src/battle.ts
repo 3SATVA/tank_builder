@@ -6,6 +6,7 @@ import { attachInput, type InputController } from "./input";
 import { angleDelta, clamp, localToWorld, rotateToward, worldToLocal } from "./math";
 import { hitsBlock, hitsHazard, pickMap, resolveTank, TILE, type ArenaMap, type MapBlock } from "./maps";
 import { PAL } from "./palette";
+import { CELL_ART, boomArt, moduleArt, nearestScale, obstacleArt, shotArt } from "./sprites";
 import {
   blockPlate,
   cloneGrid,
@@ -16,21 +17,13 @@ import {
   isTurretCell,
   moduleIdOf,
   turretOrigin,
-  TURRET_SIZE,
 } from "./modules";
 import { sfxBoom, sfxHit, sfxShot } from "./sfx";
 import { computeStats, fuelDrainPerSecond, maxDriveSpeed, maxTurnRate } from "./stats";
-import type { ModuleKind } from "./types";
 
 const TURRET_TURN = 4.6;
 const LAVA_DPS = 18;
-/**
- * World units per art pixel. 8 divides both the 24px cell and the 32px map tile,
- * so blocks stay on the pixel grid. The screen then scales those art pixels by an
- * integer so a tank is about 70–80 CSS px tall.
- */
-const WORLD_PER_ART = 8;
-const TANK_WORLD = 7 * 24;
+/** Authored module sprites are CELL_ART pixels. On screen each of those maps to an integer run of device pixels. */
 
 interface Sprite {
   canvas: HTMLCanvasElement;
@@ -46,11 +39,11 @@ function makeSprite(): Sprite {
 
 const hullSprite = makeSprite();
 const turretSprite = makeSprite();
-const shotSprite = makeSprite();
 const worldBuffer = makeSprite();
 
-function quant(value: number): number {
-  return Math.round(value / WORLD_PER_ART) * WORLD_PER_ART;
+function snapWorld(value: number, cellPx: number): number {
+  const step = CELL / cellPx;
+  return Math.round(value / step) * step;
 }
 
 type Side = "player" | "rival";
@@ -231,8 +224,6 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas unavailable");
   const context = ctx;
-  let pen: CanvasRenderingContext2D = context;
-  let surface: CanvasRenderingContext2D = context;
   const input = attachInput(moveStick.base, moveStick.knob, aimStick.base, aimStick.knob);
   const rivalAi = createBotController(options.rivalTuning);
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -479,7 +470,8 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
 
   function draw(): void {
     const view = currentView();
-    const cover = Math.ceil(Math.hypot(view.artW, view.artH)) + 4;
+    const px = view.cellPx / CELL;
+    const cover = Math.ceil(Math.hypot(view.viewW, view.viewH) * px) + 8;
     if (worldBuffer.canvas.width !== cover || worldBuffer.canvas.height !== cover) {
       worldBuffer.canvas.width = cover;
       worldBuffer.canvas.height = cover;
@@ -489,41 +481,23 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     world.setTransform(1, 0, 0, 1, 0, 0);
     world.fillStyle = PAL.void;
     world.fillRect(0, 0, cover, cover);
-    const scale = 1 / WORLD_PER_ART;
-    world.setTransform(scale, 0, 0, scale, cover / 2 - camX * scale, cover / 2 - camY * scale);
-    pen = world;
-    surface = world;
-    drawArena();
-    drawTank(rival, PAL.redDark);
-    drawTank(player, PAL.navy);
-    for (const shot of shots) {
-      paintSprite(shotSprite, 18, 8, 0, 0, () => {
-        box(-8, -2, 12, 4, shot.color);
-        box(2, -2, 4, 4, PAL.white);
-      });
-      blit(shotSprite, shot.x, shot.y, Math.atan2(shot.vy, shot.vx), 18, 8);
-    }
-    for (const bit of particles) {
-      box(bit.x, bit.y, 8, 8, bit.color);
-    }
-    pen = context;
-    surface = context;
+    drawArena(world, view, cover);
 
-    const jx = shake > 0 && !reduceMotion ? Math.round((Math.random() - 0.5) * 3) : 0;
-    const jy = shake > 0 && !reduceMotion ? Math.round((Math.random() - 0.5) * 3) : 0;
-    const ox = Math.floor((view.deviceW - view.artW * view.devicePerArt) / 2);
-    const oy = Math.floor((view.deviceH - view.artH * view.devicePerArt) / 2);
+    const jx = shake > 0 && !reduceMotion ? Math.round((Math.random() - 0.5) * 4) : 0;
+    const jy = shake > 0 && !reduceMotion ? Math.round((Math.random() - 0.5) * 4) : 0;
     context.imageSmoothingEnabled = false;
     context.setTransform(1, 0, 0, 1, 0, 0);
     context.fillStyle = PAL.void;
     context.fillRect(0, 0, canvas.width, canvas.height);
-    context.setTransform(view.devicePerArt, 0, 0, view.devicePerArt, ox + jx * view.devicePerArt, oy + jy * view.devicePerArt);
-    context.translate(view.artW / 2, view.artH / 2);
+    context.setTransform(1, 0, 0, 1, view.deviceW / 2 + jx, view.deviceH / 2 + jy);
     context.rotate(-camAngle);
     context.drawImage(worldBuffer.canvas, -cover / 2, -cover / 2);
-
-    context.setTransform(view.devicePerArt, 0, 0, view.devicePerArt, ox, oy);
-    context.font = "8px 'Press Start 2P', monospace";
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    drawTank(rival, PAL.redDark, view);
+    drawTank(player, PAL.navy, view);
+    for (const shot of shots) drawShot(shot, view);
+    for (const bit of particles) drawBit(bit, view);
+    context.font = `${Math.max(16, view.cellPx)}px 'Press Start 2P', monospace`;
     context.textAlign = "center";
     context.textBaseline = "bottom";
     for (const floater of floaters) {
@@ -536,18 +510,18 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   }
 
   /** Screen art pixel for a world point after the camera rotation. Screen up is the player's facing. */
-  function worldToArt(x: number, y: number, artW: number, artH: number): { x: number; y: number } {
+  function worldToArt(x: number, y: number, view: Frame): { x: number; y: number } {
     const dx = x - camX;
     const dy = y - camY;
     const cos = Math.cos(camAngle);
     const sin = Math.sin(camAngle);
     const rx = dx * cos + dy * sin;
     const ry = -dx * sin + dy * cos;
-    return { x: artW / 2 + rx / WORLD_PER_ART, y: artH / 2 + ry / WORLD_PER_ART };
+    return { x: view.deviceW / 2 + (rx * view.cellPx) / CELL, y: view.deviceH / 2 + (ry * view.cellPx) / CELL };
   }
 
   function artText(text: string, worldX: number, worldY: number, view: Frame, color: string): void {
-    const at = worldToArt(worldX, worldY, view.artW, view.artH);
+    const at = worldToArt(worldX, worldY, view);
     const ax = Math.round(at.x);
     const ay = Math.round(at.y);
     context.fillStyle = PAL.shadow;
@@ -557,59 +531,65 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   }
 
   function drawTankLabel(tank: Tank, view: Frame): void {
-    const at = worldToArt(tank.x, tank.y, view.artW, view.artH);
+    const at = worldToArt(tank.x, tank.y, view);
     const ax = Math.round(at.x);
-    const ay = Math.round(at.y) - 18;
+    const ay = Math.round(at.y) - view.cellPx * 4;
     context.fillStyle = PAL.shadow;
     context.fillText(tank.name, ax + 1, ay + 1);
     context.fillStyle = PAL.paper;
     context.fillText(tank.name, ax, ay);
+    const bar = view.cellPx * 2;
     context.fillStyle = PAL.shadow;
-    context.fillRect(ax - 8, ay + 3, 16, 2);
+    context.fillRect(ax - bar / 2, ay + 4, bar, 3);
     context.fillStyle = tank.id === "player" ? PAL.green : PAL.red;
-    context.fillRect(ax - 8, ay + 3, Math.round(16 * clamp(tank.core / tank.coreMax, 0, 1)), 2);
+    context.fillRect(ax - bar / 2, ay + 4, Math.round(bar * clamp(tank.core / tank.coreMax, 0, 1)), 3);
   }
 
   function drawMinimap(view: Frame): void {
     const cols = Math.round(map.w / TILE);
     const rows = Math.round(map.h / TILE);
     const step = 2;
+    const unit = 4;
     const mw = Math.ceil(cols / step);
     const mh = Math.ceil(rows / step);
-    const ox = view.artW - mw - 4;
-    const oy = Math.max(4, Math.round(view.artH * 0.4));
+    const ox = view.deviceW - mw * unit - 16;
+    const oy = Math.max(16, Math.round(view.deviceH * 0.42));
     context.fillStyle = PAL.shadow;
-    context.fillRect(ox - 1, oy - 1, mw + 2, mh + 2);
+    context.fillRect(ox - unit, oy - unit, mw * unit + unit * 2, mh * unit + unit * 2);
     context.fillStyle = PAL.paper;
-    context.fillRect(ox - 1, oy - 1, mw + 2, 1);
-    context.fillRect(ox - 1, oy - 1, 1, mh + 2);
+    context.fillRect(ox - unit, oy - unit, mw * unit + unit * 2, 2);
+    context.fillRect(ox - unit, oy - unit, 2, mh * unit + unit * 2);
     context.fillStyle = map.ground;
-    context.fillRect(ox, oy, mw, mh);
+    context.fillRect(ox, oy, mw * unit, mh * unit);
     for (const block of map.blocks) {
       context.fillStyle = block.color;
-      context.fillRect(Math.floor(ox + block.x / (TILE * step)), Math.floor(oy + block.y / (TILE * step)), 1, 1);
+      const gx = Math.floor(block.x / (TILE * step));
+      const gy = Math.floor(block.y / (TILE * step));
+      context.fillRect(ox + gx * unit, oy + gy * unit, unit, unit);
     }
     for (const pool of map.hazards) {
       context.fillStyle = PAL.lava;
-      context.fillRect(Math.floor(ox + pool.x / (TILE * step)), Math.floor(oy + pool.y / (TILE * step)), 1, 1);
+      const gx = Math.floor(pool.x / (TILE * step));
+      const gy = Math.floor(pool.y / (TILE * step));
+      context.fillRect(ox + gx * unit, oy + gy * unit, unit, unit);
     }
     const mark = (x: number, y: number, color: string): void => {
       context.fillStyle = color;
-      context.fillRect(Math.round(ox + x / (TILE * step) - 1), Math.round(oy + y / (TILE * step) - 1), 2, 2);
+      context.fillRect(ox + Math.round(x / (TILE * step)) * unit - 2, oy + Math.round(y / (TILE * step)) * unit - 2, unit + 2, unit + 2);
     };
     mark(rival.x, rival.y, PAL.red);
     mark(player.x, player.y, PAL.cyan);
     context.fillStyle = PAL.gold;
     context.fillRect(
-      Math.round(ox + player.x / (TILE * step) + Math.sin(player.angle) * 3),
-      Math.round(oy + player.y / (TILE * step) - Math.cos(player.angle) * 3),
-      2,
-      2,
+      ox + Math.round(player.x / (TILE * step)) * unit + Math.round(Math.sin(player.angle) * unit * 2),
+      oy + Math.round(player.y / (TILE * step)) * unit + Math.round(-Math.cos(player.angle) * unit * 2),
+      unit,
+      unit,
     );
   }
 
   function drawArrow(view: Frame): void {
-    const at = worldToArt(rival.x, rival.y, view.artW, view.artH);
+    const at = worldToArt(rival.x, rival.y, view);
     const ax = at.x;
     const ay = at.y;
     const left = 16;
@@ -628,300 +608,206 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     const px = Math.round(cx + (dx / dist) * reach);
     const py = Math.round(cy + (dy / dist) * reach);
     context.fillStyle = PAL.shadow;
-    context.fillRect(px - 6, py - 6, 12, 12);
+    context.fillRect(px - 14, py - 14, 28, 28);
     context.fillStyle = PAL.red;
-    context.fillRect(px - 5, py - 5, 10, 10);
+    context.fillRect(px - 11, py - 11, 22, 22);
     context.fillStyle = PAL.gold;
-    const ux = Math.round((dx / dist) * 3);
-    const uy = Math.round((dy / dist) * 3);
-    context.fillRect(px - 2 + ux, py - 2 + uy, 4, 4);
+    const ux = Math.round((dx / dist) * 8);
+    const uy = Math.round((dy / dist) * 8);
+    context.fillRect(px - 4 + ux, py - 4 + uy, 8, 8);
   }
 
-  function drawArena(): void {
-    box(-TILE * 4, -TILE * 4, map.w + TILE * 8, map.h + TILE * 8, PAL.void);
+  function drawArena(world: CanvasRenderingContext2D, view: Frame, cover: number): void {
     const cols = Math.round(map.w / TILE);
     const rows = Math.round(map.h / TILE);
+    const frame = Math.floor(simTime * 6);
     for (let r = 0; r < rows; r += 1) {
       for (let c = 0; c < cols; c += 1) {
-        box(c * TILE, r * TILE, TILE, TILE, (c + r) % 2 === 0 ? map.ground : map.alt);
+        const x0 = bufX(c * TILE, cover, view);
+        const y0 = bufY(r * TILE, cover, view);
+        const x1 = bufX((c + 1) * TILE, cover, view);
+        const y1 = bufY((r + 1) * TILE, cover, view);
+        if (x1 < 0 || y1 < 0 || x0 > cover || y0 > cover) continue;
+        world.fillStyle = (c + r) % 2 === 0 ? map.ground : map.alt;
+        world.fillRect(x0, y0, x1 - x0, y1 - y0);
         const n = (Math.imul(c + r * 17 + map.w, 1103515245) + 12345) >>> 16;
-        if ((n & 7) === 0) box(c * TILE + (n & 14), r * TILE + ((n >> 4) & 14), 2, 2, PAL.shadow);
+        if ((n & 7) === 0) {
+          world.fillStyle = PAL.shadow;
+          world.fillRect(x0 + (n & 7), y0 + ((n >> 3) & 7), 2, 2);
+        }
       }
     }
-    for (const pool of map.hazards) drawLava(pool);
-    for (const block of map.blocks) drawCover(block);
-    edge(0, 0, map.w, map.h, 4, map.edge);
+    for (const pool of map.hazards) stampBlock(world, pool, view, cover, frame);
+    for (const block of map.blocks) stampBlock(world, block, view, cover, 0);
+    const left = bufX(0, cover, view);
+    const top = bufY(0, cover, view);
+    const right = bufX(map.w, cover, view);
+    const bottom = bufY(map.h, cover, view);
+    world.fillStyle = map.edge;
+    world.fillRect(left, top, right - left, 3);
+    world.fillRect(left, bottom - 3, right - left, 3);
+    world.fillRect(left, top, 3, bottom - top);
+    world.fillRect(right - 3, top, 3, bottom - top);
   }
 
-  function drawCover(block: MapBlock): void {
-    const { x, y, w, h, kind, color } = block;
-    box(x, y, w, h, color);
-    edge(x, y, w, h, 2, PAL.shadow);
-    box(x + 2, y + 2, w - 4, 2, PAL.paper);
-    if (kind === "H") {
-      box(x + 4, y + 8, w - 8, 4, PAL.hayDark);
-      box(x + 4, y + 18, w - 8, 4, PAL.hayDark);
-    } else if (kind === "R" || kind === "P" || kind === "#") {
-      box(x + 6, y + 6, 6, 6, PAL.shadow);
-      box(x + w - 12, y + h - 12, 6, 6, PAL.gray);
-    } else if (kind === "K") {
-      box(x + 4, y + 4, 6, 6, PAL.stone);
-      box(x + w / 2 - 3, y + 4, 6, 6, PAL.stone);
-      box(x + w - 10, y + 4, 6, 6, PAL.stone);
-    } else if (kind === "T") {
-      box(x + w / 2 - 2, y + 6, 4, h - 12, PAL.brownDark);
-      box(x + 8, y + 10, w - 16, 4, PAL.brownDark);
-    } else if (kind === "C") {
-      box(x + 8, y + 12, w - 16, h - 16, PAL.shadow);
-      box(x + 4, y + 4, w - 8, 4, PAL.tan);
-    } else if (kind === "Y") {
-      box(x + w / 2 - 2, y + 8, 4, h - 10, PAL.brownDark);
-      box(x + 6, y + 6, w - 12, 4, PAL.brownDark);
-      box(x + 8, y + 14, w - 16, 4, PAL.ink);
-    } else if (kind === "F") {
-      box(x + 4, y + 4, 2, h - 8, PAL.paper);
-      box(x + w / 2 - 1, y + 4, 2, h - 8, PAL.paper);
-      box(x + w - 6, y + 4, 2, h - 8, PAL.paper);
-      box(x + 4, y + 8, w - 8, 2, PAL.paper);
-    } else if (kind === "U" || kind === "N") {
-      box(x, y, w, 8, kind === "U" ? PAL.redDark : PAL.sand);
-      box(x + 6, y + 14, 6, 6, PAL.gold);
-      box(x + w - 12, y + 14, 6, 6, PAL.gold);
-    } else if (kind === "X") {
-      box(x + 4, y + h / 2 - 2, w - 8, 4, PAL.brownDark);
-      box(x + w / 2 - 2, y + 4, 4, h - 8, PAL.brownDark);
-    } else if (kind === "S") {
-      box(x + 4, y + 6, 10, 6, PAL.sand);
-      box(x + 14, y + 14, 10, 8, PAL.brownDark);
-    } else if (kind === "V" || kind === "D") {
-      box(x + 2, y + h - 10, 8, 6, PAL.tire);
-      box(x + w - 10, y + h - 10, 8, 6, PAL.tire);
-      box(x + 6, y + 6, w - 12, 6, PAL.cyan);
-    } else if (kind === "I") {
-      box(x + 4, y + 4, w - 8, 6, PAL.grayDark);
-      box(x + 4, y + 12, w - 8, 6, PAL.grayDark);
-      box(x + 4, y + 20, w - 8, 6, PAL.grayDark);
-      box(x + 12, y + 6, 8, 2, PAL.stoneDark);
-      box(x + 12, y + 14, 8, 2, PAL.stoneDark);
-    }
+  function bufX(wx: number, cover: number, view: Frame): number {
+    return Math.round(cover / 2 + ((wx - camX) * view.cellPx) / CELL);
   }
 
-  function drawLava(block: MapBlock): void {
-    box(block.x, block.y, block.w, block.h, PAL.lava);
-    box(block.x + 4, block.y + 4, block.w - 8, block.h - 8, PAL.orange);
-    const tick = reduceMotion ? 0 : Math.floor(simTime * 5 + block.x / TILE);
-    const bob = (tick % 4) * 4;
-    box(block.x + 6 + bob, block.y + 8, 4, 4, PAL.gold);
-    box(block.x + 18 - bob, block.y + 18, 4, 4, PAL.cream);
-    box(block.x + 10, block.y + 6 + (tick % 3) * 4, 4, 4, PAL.gold);
+  function bufY(wy: number, cover: number, view: Frame): number {
+    return Math.round(cover / 2 + ((wy - camY) * view.cellPx) / CELL);
   }
 
-  function drawTank(tank: Tank, chassis: string): void {
+  function stampBlock(world: CanvasRenderingContext2D, block: MapBlock, view: Frame, cover: number, frame: number): void {
+    const x0 = bufX(block.x, cover, view);
+    const y0 = bufY(block.y, cover, view);
+    const x1 = bufX(block.x + block.w, cover, view);
+    const y1 = bufY(block.y + block.h, cover, view);
+    const dw = Math.max(1, x1 - x0);
+    const dh = Math.max(1, y1 - y0);
+    const src = obstacleArt(block.kind, frame);
+    const scaled = nearestScale(src, dw, dh, `obs-${block.kind}-${frame}-${dw}x${dh}`);
+    world.drawImage(scaled, x0, y0);
+  }
+
+  function drawTank(tank: Tank, chassis: string, view: Frame): void {
     const cols = tank.grid[0]?.length ?? 1;
     const rows = tank.grid.length;
-    const bodyW = cols * CELL;
-    const bodyH = rows * CELL;
-    const span = Math.max(bodyW, bodyH) + CELL * 4;
-    box(tank.x - bodyW * 0.28 + 4, tank.y - bodyH * 0.18 + 6, bodyW * 0.56, bodyH * 0.4, PAL.shadow);
-    paintSprite(hullSprite, span, span, 0, 0, () => {
-      box(-bodyW / 2 - 4, -bodyH / 2 - 4, bodyW + 8, bodyH + 8, chassis);
-      edge(-bodyW / 2 - 4, -bodyH / 2 - 4, bodyW + 8, bodyH + 8, 2, PAL.shadow);
-      drawNose(bodyH);
-      drawCells(tank, false);
-      if (tank.flash > 0) dither(tank, false);
+    const cell = view.cellPx;
+    const gridW = cols * cell;
+    const gridH = rows * cell;
+    const pad = cell * 2;
+    paintLayer(hullSprite, gridW + pad * 2, gridH + pad * 2, () => {
+      const ctx = hullSprite.ctx;
+      ctx.fillStyle = chassis;
+      ctx.fillRect(pad - 2, pad - 2, gridW + 4, gridH + 4);
+      ctx.fillStyle = PAL.shadow;
+      ctx.fillRect(pad - 2, pad - 2, gridW + 4, 2);
+      ctx.fillRect(pad - 2, pad + gridH, gridW + 4, 2);
+      ctx.fillRect(pad - 2, pad, 2, gridH);
+      ctx.fillRect(pad + gridW, pad, 2, gridH);
+      drawNosePixels(ctx, pad, gridW);
+      blitCells(ctx, tank, false, pad, cell);
     });
-    blit(hullSprite, tank.x, tank.y, tank.angle, span, span);
+    const at = worldToArt(tank.x, tank.y, view);
+    blitRotated(hullSprite.canvas, at.x, at.y, tank.angle - camAngle, pad + gridW / 2, pad + gridH / 2);
 
+    const origin = turretOrigin(tank.hull);
+    const pivotX = pad + (origin.c + 1) * cell + cell / 2;
+    const pivotY = pad + (origin.r + 1) * cell + cell / 2;
+    paintLayer(turretSprite, gridW + pad * 2, gridH + pad * 2, () => {
+      blitCells(turretSprite.ctx, tank, true, pad, cell);
+      const ctx = turretSprite.ctx;
+      const x = pad + origin.c * cell;
+      const y = pad + origin.r * cell;
+      ctx.fillStyle = PAL.amber;
+      ctx.fillRect(x, y, cell * 3, 2);
+      ctx.fillRect(x, y + cell * 3 - 2, cell * 3, 2);
+      ctx.fillRect(x, y, 2, cell * 3);
+      ctx.fillRect(x + cell * 3 - 2, y, 2, cell * 3);
+    });
     const pivot = turretPivot(cols, rows, tank.hull);
-    const pivoted = localToWorld(pivot.x, pivot.y, tank.angle);
-    paintSprite(turretSprite, span, span, pivot.x, pivot.y, () => {
-      drawCells(tank, true);
-      const origin = turretOrigin(tank.hull);
-      const top = cellCenter(origin.c, origin.r, cols, rows);
-      edge(top.x - CELL / 2, top.y - CELL / 2, TURRET_SIZE * CELL, TURRET_SIZE * CELL, 2, PAL.amber);
-      if (tank.flash > 0) dither(tank, true);
-    });
-    blit(turretSprite, tank.x + pivoted.x, tank.y + pivoted.y, tank.turret, span, span);
+    const spun = localToWorld(pivot.x, pivot.y, tank.angle);
+    const tip = worldToArt(tank.x + spun.x, tank.y + spun.y, view);
+    blitRotated(turretSprite.canvas, tip.x, tip.y, tank.turret - camAngle, pivotX, pivotY);
   }
 
-  function dither(tank: Tank, turretLayer: boolean): void {
+  function drawNosePixels(ctx: CanvasRenderingContext2D, pad: number, gridW: number): void {
+    const cx = pad + gridW / 2;
+    const y = pad - 8;
+    ctx.fillStyle = PAL.gold;
+    ctx.fillRect(cx - 6, y + 4, 12, 2);
+    ctx.fillStyle = PAL.amber;
+    ctx.fillRect(cx - 4, y + 2, 8, 2);
+    ctx.fillRect(cx - 2, y, 4, 2);
+  }
+
+  function blitCells(ctx: CanvasRenderingContext2D, tank: Tank, turretLayer: boolean, pad: number, cell: number): void {
     const cols = tank.grid[0]?.length ?? 1;
     const rows = tank.grid.length;
+    const moving = Math.hypot(tank.vx, tank.vy) > 18;
     for (let r = 0; r < rows; r += 1) {
       for (let c = 0; c < cols; c += 1) {
         if (isTurretCell(r, c, cols, rows, tank.hull) !== turretLayer) continue;
-        const center = cellCenter(c, r, cols, rows);
-        box(center.x - 4, center.y - 4, 2, 2, PAL.white);
-        box(center.x + 2, center.y + 2, 2, 2, PAL.white);
-      }
-    }
-  }
-
-  function drawNose(bodyH: number): void {
-    const top = -bodyH / 2 - 10;
-    box(-2, top, 4, 2, PAL.amber);
-    box(-4, top + 2, 8, 2, PAL.amber);
-    box(-6, top + 4, 12, 2, PAL.gold);
-  }
-
-  function drawCells(tank: Tank, turretLayer: boolean): void {
-    const cols = tank.grid[0]?.length ?? 1;
-    const rows = tank.grid.length;
-    for (let r = 0; r < rows; r += 1) {
-      for (let c = 0; c < cols; c += 1) {
-        const turret = isTurretCell(r, c, cols, rows, tank.hull);
-        if (turret !== turretLayer) continue;
-        const id = tank.grid[r][c];
-        const center = cellCenter(c, r, cols, rows);
-        const size = CELL - 2;
-        const x = center.x - size / 2;
-        const y = center.y - size / 2;
-        const mod = cellModule(id);
-        box(x, y, size, size, mod?.color ?? PAL.void);
-        edge(x, y, size, size, 2, PAL.shadow);
-        box(x + 2, y + 2, size - 4, 2, PAL.paper);
-        if (isCoreCell(r, c, cols, rows, tank.hull)) box(x + size - 8, y + size - 8, 4, 4, PAL.red);
-        if (!id || !mod) continue;
-        const moving = Math.hypot(tank.vx, tank.vy) > 18;
-        const anchor = isAnchorCell(id, r, c);
-        if (mod.kind === "weapon") {
-          if (mod.id === "medium-cannon" && !anchor) drawBreech(x, y, size);
-          else drawCannon(x, y, size, tank.muzzle > 0, (mod.rows ?? 1) > 1);
-        } else if (mod.kind === "engine") drawEngine(x, y, size, moving, r * 3 + c);
-        else if (mod.id === "heavy-armor") drawRivets(x, y, size);
-        else if (mod.repairs) drawPlus(center.x, center.y, 6);
-        else drawGlyph(mod.kind, x, y, size);
-        if (tank.sparkLife > 0 && tank.sparkCells.some((cell) => cell.r === r && cell.c === c)) {
-          drawSpark(center.x, center.y);
+        const token = tank.grid[r][c];
+        const id = moduleIdOf(token);
+        const anchor = isAnchorCell(token, r, c);
+        const art = moduleArt(id ?? "", {
+          flash: Boolean(id && (id === "cannon" || id === "medium-cannon") && anchor && tank.muzzle > 0),
+          puff: id === "engine" && moving && Math.floor(simTime * 8) % 2 === 0,
+          rear: id === "medium-cannon" && !anchor,
+        });
+        const scaled = nearestScale(art, Math.round((art.width * cell) / CELL_ART), Math.round((art.height * cell) / CELL_ART), `${id ?? "empty"}-${art.width}x${art.height}-${cell}-${tank.muzzle > 0}-${moving}`);
+        const body = scaled.height - cell;
+        ctx.drawImage(scaled, pad + c * cell, pad + r * cell - Math.max(0, body));
+        if (isCoreCell(r, c, cols, rows, tank.hull)) {
+          const pip = Math.max(4, Math.round(cell * 0.28));
+          ctx.fillStyle = PAL.red;
+          ctx.fillRect(pad + c * cell + cell - pip - 2, pad + r * cell + cell - pip - 2, pip, pip);
+          ctx.fillStyle = PAL.gold;
+          ctx.fillRect(pad + c * cell + cell - pip, pad + r * cell + cell - pip, Math.max(2, pip - 4), Math.max(2, pip - 4));
         }
-        const plateMax = blockPlate(id);
-        const left = plateMax > 0 ? tank.plate[r][c] / plateMax : 0;
-        if (left < 0.999) {
-          box(x + 3, y + size - 6, size - 6, 2, PAL.shadow);
-          box(x + 3, y + size - 6, (size - 6) * clamp(left, 0, 1), 2, PAL.paper);
+        if (tank.flash > 0 && ((r + c) % 2 === 0)) {
+          ctx.fillStyle = PAL.white;
+          ctx.fillRect(pad + c * cell + 2, pad + r * cell + 2, 2, 2);
+        }
+        const plateMax = token ? blockPlate(token) : 0;
+        const left = plateMax > 0 ? tank.plate[r][c] / plateMax : 1;
+        if (token && left < 0.999) {
+          ctx.fillStyle = PAL.shadow;
+          ctx.fillRect(pad + c * cell + 2, pad + (r + 1) * cell - 4, cell - 4, 2);
+          ctx.fillStyle = PAL.paper;
+          ctx.fillRect(pad + c * cell + 2, pad + (r + 1) * cell - 4, Math.round((cell - 4) * clamp(left, 0, 1)), 2);
         }
       }
     }
   }
 
-  function drawGlyph(kind: ModuleKind, x: number, y: number, size: number): void {
-    if (kind === "armor") {
-      edge(x + 6, y + 6, size - 12, size - 12, 2, PAL.navy);
-    } else if (kind === "tracks") {
-      box(x + 4, y + 6, size - 8, 2, PAL.shadow);
-      box(x + 4, y + size / 2 - 1, size - 8, 2, PAL.shadow);
-      box(x + 4, y + size - 8, size - 8, 2, PAL.shadow);
-    } else if (kind === "power") {
-      box(x + size / 2, y + 4, 4, 6, PAL.brownDark);
-      box(x + size / 2 - 4, y + 8, 8, 4, PAL.brownDark);
-      box(x + size / 2 - 2, y + 12, 4, 6, PAL.brownDark);
-    } else if (kind === "fuel") {
-      box(x + size / 2 - 2, y + 4, 4, 2, PAL.brownDark);
-      box(x + size / 2 - 4, y + 6, 8, 4, PAL.brownDark);
-      box(x + size / 2 - 4, y + 10, 8, 6, PAL.brownDark);
-      box(x + size / 2 - 2, y + 16, 4, 2, PAL.brownDark);
-    }
-  }
-
-  function drawCannon(x: number, y: number, size: number, flash: boolean, heavy = false): void {
-    const width = heavy ? 10 : 6;
-    const length = heavy ? 28 : 16;
-    const bx = x + size / 2 - width / 2;
-    const by = y - length + 6;
-    box(bx, by, width, length, heavy ? PAL.cyan : PAL.white);
-    box(bx, by, width, 2, PAL.shadow);
-    box(x + 4, y + size * 0.45, size - 8, 6, PAL.shadow);
-    if (!flash) return;
-    box(bx - 2, by - 4, width + 4, 4, PAL.gold);
-    box(bx + 2, by - 8, width - 4, 4, PAL.white);
-  }
-
-  function drawBreech(x: number, y: number, size: number): void {
-    box(x + 4, y + size * 0.35, size - 8, size * 0.4, PAL.shadow);
-  }
-
-  function drawRivets(x: number, y: number, size: number): void {
-    box(x + 4, y + 4, 3, 3, PAL.cream);
-    box(x + size - 7, y + 4, 3, 3, PAL.cream);
-    box(x + 4, y + size - 7, 3, 3, PAL.cream);
-    box(x + size - 7, y + size - 7, 3, 3, PAL.cream);
-  }
-
-  function drawPlus(x: number, y: number, s: number): void {
-    box(x - 1, y - s, 2, s * 2, PAL.paper);
-    box(x - s, y - 1, s * 2, 2, PAL.paper);
-  }
-
-  function drawSpark(x: number, y: number): void {
-    box(x - 6, y - 1, 4, 2, PAL.gold);
-    box(x + 2, y - 4, 2, 4, PAL.white);
-    box(x - 1, y + 3, 2, 4, PAL.green);
-  }
-
-  function drawEngine(x: number, y: number, size: number, moving: boolean, phase: number): void {
-    const bob = moving && !reduceMotion ? (Math.floor(simTime * 10 + phase) % 2) * 2 : 0;
-    for (let i = 0; i < 3; i += 1) {
-      const px = x + 4 + i * ((size - 8) / 3);
-      const ph = i === 1 ? 8 : 12;
-      box(px, y + 4 + bob, 4, ph, PAL.brownDark);
-    }
-    box(x + 6, y + size - 4, 2, 8, PAL.shadow);
-    box(x + size - 8, y + size - 2, 2, 8, PAL.shadow);
-    if (moving) box(x + size / 2 - 2, y + size + 4, 4, 4, (Math.floor(simTime * 8) % 2 === 0 ? PAL.mist : PAL.gray));
-  }
-
-  function box(x: number, y: number, w: number, h: number, color: string): void {
-    pen.fillStyle = color;
-    pen.fillRect(quant(x), quant(y), Math.max(WORLD_PER_ART, quant(w)), Math.max(WORLD_PER_ART, quant(h)));
-  }
-
-  function edge(x: number, y: number, w: number, h: number, t: number, color: string): void {
-    box(x, y, w, t, color);
-    box(x, y + h - t, w, t, color);
-    box(x, y, t, h, color);
-    box(x + w - t, y, t, h, color);
-  }
-
-  function paintSprite(
-    sprite: Sprite,
-    worldW: number,
-    worldH: number,
-    originX: number,
-    originY: number,
-    drawLocal: () => void,
-  ): void {
-    const artW = Math.max(1, Math.ceil(worldW / WORLD_PER_ART));
-    const artH = Math.max(1, Math.ceil(worldH / WORLD_PER_ART));
-    if (sprite.canvas.width !== artW || sprite.canvas.height !== artH) {
-      sprite.canvas.width = artW;
-      sprite.canvas.height = artH;
+  function paintLayer(sprite: Sprite, width: number, height: number, drawLocal: () => void): void {
+    if (sprite.canvas.width !== width || sprite.canvas.height !== height) {
+      sprite.canvas.width = width;
+      sprite.canvas.height = height;
     }
     const ctx = sprite.ctx;
     ctx.imageSmoothingEnabled = false;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, artW, artH);
-    ctx.setTransform(
-      1 / WORLD_PER_ART,
-      0,
-      0,
-      1 / WORLD_PER_ART,
-      artW / 2 - originX / WORLD_PER_ART,
-      artH / 2 - originY / WORLD_PER_ART,
-    );
-    pen = ctx;
+    ctx.clearRect(0, 0, width, height);
     drawLocal();
-    pen = surface;
   }
 
-  function blit(sprite: Sprite, x: number, y: number, angle: number, worldW: number, worldH: number): void {
-    surface.imageSmoothingEnabled = false;
-    surface.save();
-    surface.translate(quant(x), quant(y));
-    surface.rotate(angle);
-    surface.drawImage(sprite.canvas, -worldW / 2, -worldH / 2, worldW, worldH);
-    surface.restore();
+  function blitRotated(source: HTMLCanvasElement, x: number, y: number, angle: number, originX: number, originY: number): void {
+    context.imageSmoothingEnabled = false;
+    context.save();
+    context.translate(Math.round(x), Math.round(y));
+    context.rotate(angle);
+    context.drawImage(source, Math.round(-originX), Math.round(-originY));
+    context.restore();
   }
 
+  function drawShot(shot: Shot, view: Frame): void {
+    const at = worldToArt(shot.x, shot.y, view);
+    const src = shotArt();
+    const w = Math.max(8, Math.round(view.cellPx * 0.9));
+    const h = Math.max(4, Math.round(w * 0.5));
+    const scaled = nearestScale(src, w, h, `shot-${w}`);
+    context.save();
+    context.translate(Math.round(at.x), Math.round(at.y));
+    context.rotate(Math.atan2(shot.vy, shot.vx) - camAngle);
+    context.drawImage(scaled, -w + 2, Math.round(-h / 2));
+    context.restore();
+  }
+
+  function drawBit(bit: Particle, view: Frame): void {
+    const at = worldToArt(bit.x, bit.y, view);
+    const size = bit.puff ? Math.max(3, Math.round(view.cellPx * 0.35)) : Math.max(4, Math.round(view.cellPx * 0.55));
+    if (!bit.puff && bit.life > bit.max * 0.45) {
+      const boom = nearestScale(boomArt(), size * 2, size * 2, `boom-${size}`);
+      context.drawImage(boom, Math.round(at.x - size), Math.round(at.y - size));
+      return;
+    }
+    context.fillStyle = bit.color;
+    context.fillRect(Math.round(at.x), Math.round(at.y), size, size);
+  }
   interface Frame {
     artW: number;
     artH: number;
@@ -930,6 +816,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     devicePerArt: number;
     deviceW: number;
     deviceH: number;
+    cellPx: number;
     camX: number;
     camY: number;
     rect: DOMRect;
@@ -938,25 +825,27 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   function measure(): Frame {
     const rect = canvas.getBoundingClientRect();
     const dpr = Math.min(window.devicePixelRatio || 1, 3);
-    const tankArt = TANK_WORLD / WORLD_PER_ART;
-    const targetCss = rect.width >= 800 ? 60 : 76;
-    const devicePerArt = Math.max(2, Math.round((targetCss * dpr) / tankArt));
-    const deviceW = Math.max(1, Math.round(Math.max(rect.width, 1) * dpr));
-    const deviceH = Math.max(1, Math.round(Math.max(rect.height, 1) * dpr));
-    const artW = Math.max(1, Math.floor(deviceW / devicePerArt));
-    const artH = Math.max(1, Math.floor(deviceH / devicePerArt));
+    const cssW = Math.max(rect.width, 1);
+    const cssH = Math.max(rect.height, 1);
+    const targetCss = cssW >= 800 ? 64 : 74;
+    const rawCell = Math.round((targetCss * dpr) / 7);
+    const cellPx = Math.max(CELL_ART, Math.round(rawCell / CELL_ART) * CELL_ART);
+    const deviceW = Math.max(1, Math.round(cssW * dpr));
+    const deviceH = Math.max(1, Math.round(cssH * dpr));
     if (canvas.width !== deviceW || canvas.height !== deviceH) {
       canvas.width = deviceW;
       canvas.height = deviceH;
     }
+    const pxPerWorld = cellPx / CELL;
     return {
-      artW,
-      artH,
-      viewW: artW * WORLD_PER_ART,
-      viewH: artH * WORLD_PER_ART,
-      devicePerArt,
+      artW: deviceW,
+      artH: deviceH,
+      viewW: deviceW / pxPerWorld,
+      viewH: deviceH / pxPerWorld,
+      devicePerArt: 1,
       deviceW,
       deviceH,
+      cellPx,
       camX,
       camY,
       rect,
@@ -978,8 +867,8 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       camY += (targetY - camY) * blend;
       camAngle += angleDelta(camAngle, player.angle) * (1 - Math.exp(-12 * dt));
     }
-    camX = quant(camX);
-    camY = quant(camY);
+    camX = snapWorld(camX, frame.cellPx);
+    camY = snapWorld(camY, frame.cellPx);
   }
 
   function currentView(): Frame {
@@ -988,10 +877,10 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
 
   function clientToWorld(clientX: number, clientY: number): { x: number; y: number } {
     const view = currentView();
-    const sx = ((clientX - view.rect.left) / Math.max(1, view.rect.width)) * view.artW - view.artW / 2;
-    const sy = ((clientY - view.rect.top) / Math.max(1, view.rect.height)) * view.artH - view.artH / 2;
-    const rx = sx * WORLD_PER_ART;
-    const ry = sy * WORLD_PER_ART;
+    const sx = ((clientX - view.rect.left) / Math.max(1, view.rect.width)) * view.deviceW - view.deviceW / 2;
+    const sy = ((clientY - view.rect.top) / Math.max(1, view.rect.height)) * view.deviceH - view.deviceH / 2;
+    const rx = (sx * CELL) / view.cellPx;
+    const ry = (sy * CELL) / view.cellPx;
     const cos = Math.cos(camAngle);
     const sin = Math.sin(camAngle);
     return { x: camX + rx * cos - ry * sin, y: camY + rx * sin + ry * cos };
