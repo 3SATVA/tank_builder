@@ -413,6 +413,78 @@ const DRONE_RIVAL_FLASH = [
   "..KKKKKKKK..",
 ];
 
+const HARPOON = [
+  "....KK....",
+  "...KWWK...",
+  "....YY....",
+  "....YY....",
+  "....SS....",
+  "....SS....",
+  "....SS....",
+  "....SS....",
+  "...SSSS...",
+  "..SSSSSS..",
+  ".KKSSSSKK.",
+  "SSSSSSSSSS",
+  "SWWWWWWWWS",
+  "SWTTTTTTWS",
+  "SW.TTTT.WS",
+  "SW......WS",
+  "SW......WS",
+  "SttttttttS",
+  "KKKKKKKKKK",
+];
+
+const HARPOON_FLASH = [
+  "..AAAAAA..",
+  ".AFFFFFFA.",
+  "....YY....",
+  "....YY....",
+  "....SS....",
+  "....SS....",
+  "....SS....",
+  "....SS....",
+  "...SSSS...",
+  "..SSSSSS..",
+  ".KKSSSSKK.",
+  "SSSSSSSSSS",
+  "SWWWWWWWWS",
+  "SWTTTTTTWS",
+  "SW.TTTT.WS",
+  "SW......WS",
+  "SW......WS",
+  "SttttttttS",
+  "KKKKKKKKKK",
+];
+
+const HARPOON_REAR = [
+  "KKKKKKKKKK",
+  "KWWWWWWWWK",
+  "KWSSSSSSWK",
+  "KWSKKKKSWK",
+  "KWSKGGKSWK",
+  "KWSKGGKSWK",
+  "KWSKKKKSWK",
+  "KWSSSSSSWK",
+  "KWWWWWWWWK",
+  "KKKKKKKKKK",
+];
+
+const HARPOON_ICON = ["....KK....", "...KWWK...", "....SS....", "...SSSS...", "..SSSSSS..", "KKSSSSSSKK", "SSSSSSSSSS", "SWTTTTTTWS", "SWWWWWWWWS", "KKKKKKKKKK"];
+
+const CUTTER = [
+  "...KKKK...",
+  "..KWWWWK..",
+  ".KWSSSSWK.",
+  "KWSSKKSSWK",
+  "KWSKGGKSWK",
+  "KWSKGGKSWK",
+  "KWSSKKSSWK",
+  ".KWSSSSWK.",
+  "..KWWWWK..",
+  "...KKKK...",
+];
+
 export function moduleArt(id: string, opts: SpriteOpts = {}): HTMLCanvasElement {
   if (id === "heavy-armor") return bake(HEAVY, "heavy");
   if (id === "repair-bay") return bake(REPAIR, "repair");
@@ -427,6 +499,11 @@ export function moduleArt(id: string, opts: SpriteOpts = {}): HTMLCanvasElement 
   }
   if (id === "robot-bay") return bake(ROBOT_QUADS[opts.quad ?? 0] ?? ROBOT_QUADS[0], `robot-${opts.quad ?? 0}`);
   if (id === "shield-gen") return bake(SHIELD_QUADS[opts.quad ?? 0] ?? SHIELD_QUADS[0], `shield-${opts.quad ?? 0}`);
+  if (id === "harpoon") {
+    if (opts.rear) return bake(HARPOON_REAR, "harp-rear");
+    return bake(opts.flash ? HARPOON_FLASH : HARPOON, opts.flash ? "harp-flash" : "harp");
+  }
+  if (id === "cutter") return bake(CUTTER, "cutter");
   if (id === "cannon") return bake(opts.flash ? CANNON_FLASH : CANNON, opts.flash ? "can-flash" : "can");
   if (id === "engine") return bake(opts.puff ? ENGINE_PUFF : ENGINE, opts.puff ? "eng-puff" : "eng");
   if (id === "fuel") return bake(FUEL, "fuel");
@@ -807,6 +884,7 @@ export function bodyArt(id: string): HTMLCanvasElement {
   if (id === "heavy-cannon") return bake(HEAVY_ICON, "hvy-icon");
   if (id === "robot-bay") return bake(ROBOT_ICON, "robot-icon");
   if (id === "shield-gen") return bake(SHIELD_ICON, "shield-icon");
+  if (id === "harpoon") return bake(HARPOON_ICON, "harp-icon");
   const full = moduleArt(id, { rear: id === "medium-cannon" });
   if (full.height <= CELL_ART) return full;
   const key = `body-${id}`;

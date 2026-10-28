@@ -87,6 +87,31 @@ export const MODULES: readonly ModuleDef[] = [
     repairs: true,
   },
   {
+    id: "harpoon",
+    kind: "weapon",
+    name: "Harpoon",
+    starter: false,
+    color: PAL.tan,
+    blurb: "18 dmg · pulls · uses 3",
+    stats: { damage: 18, fireRate: 0.18, powerUse: 3 },
+    rows: 2,
+    cols: 1,
+    plate: 40,
+    shotLife: 1.4,
+    hook: true,
+  },
+  {
+    id: "cutter",
+    kind: "weapon",
+    name: "Cutter",
+    starter: false,
+    color: PAL.steel,
+    blurb: "saws on contact · uses 1",
+    stats: { powerUse: 1 },
+    plate: 36,
+    cutter: true,
+  },
+  {
     id: "heavy-armor",
     kind: "armor",
     name: "Heavy Armor",
@@ -150,6 +175,20 @@ export const NEW_SHOP_COST = 50;
 export const SHOP_ITEMS: readonly ShopItem[] = [
   {
     kind: "module",
+    moduleId: "harpoon",
+    cost: NEW_SHOP_COST,
+    name: "Harpoon",
+    tagline: "Two cells in a line. Fires a short-range spear along the mount, hull or turret. A hit does moderate damage and reels the enemy in. Slow reload. Draws 3 power.",
+  },
+  {
+    kind: "module",
+    moduleId: "cutter",
+    cost: NEW_SHOP_COST,
+    name: "Cutter",
+    tagline: "A spinning blade. Enemy blocks and drones that touch it take damage the whole time they stay in contact. Draws 1 power.",
+  },
+  {
+    kind: "module",
     moduleId: "heavy-cannon",
     cost: NEW_SHOP_COST,
     name: "Heavy Cannon",
@@ -188,7 +227,7 @@ export const SHOP_ITEMS: readonly ShopItem[] = [
     moduleId: "repair-bay",
     cost: 200,
     name: "Repair Bay",
-    tagline: "Every few seconds, restores the most hurt block or rebuilds a destroyed one. Never the core. Draws 2 power while it is fixing.",
+    tagline: "Every few seconds, restores the most hurt block or rebuilds a destroyed one. Draws 2 power while it is fixing.",
   },
   {
     kind: "module",
@@ -217,7 +256,7 @@ export function modulesFor(unlocked: readonly string[]): ModuleDef[] {
   return MODULES.filter((mod) => mod.starter || owned.has(mod.id));
 }
 
-/** Bare core before any blocks. Armor does not add to this; it soaks hits on its own cell. */
+/** Bare hull before any blocks. Armor soaks hits on its own cell and does not add a separate pool. */
 export const BASE_HULL = {
   hp: 70,
   speed: 28,
@@ -243,8 +282,6 @@ export interface HullDef {
   mark: string;
   /** Top-left cell of the 3×3 turret. Null when every gun is mounted on the hull. */
   turret: { r: number; c: number } | null;
-  /** Empty cell that takes a core hit. On turreted hulls this is the turret center. */
-  core: { r: number; c: number };
 }
 
 export const HULLS: readonly HullDef[] = [
@@ -257,7 +294,6 @@ export const HULLS: readonly HullDef[] = [
     rows: GRID_ROWS,
     mark: "Std",
     turret: { r: 2, c: 1 },
-    core: { r: 3, c: 2 },
   },
   {
     id: "rear",
@@ -268,7 +304,6 @@ export const HULLS: readonly HullDef[] = [
     rows: GRID_ROWS,
     mark: "Rear",
     turret: { r: 4, c: 1 },
-    core: { r: 5, c: 2 },
   },
   {
     id: "gun-deck",
@@ -279,7 +314,6 @@ export const HULLS: readonly HullDef[] = [
     rows: 7,
     mark: "Deck",
     turret: null,
-    core: { r: 3, c: 2 },
   },
 ];
 
@@ -319,17 +353,6 @@ export function isTurretCell(row: number, col: number, cols = GRID_COLS, rows = 
       : { c: Math.floor((cols - TURRET_SIZE) / 2), r: Math.floor((rows - TURRET_SIZE) / 2) };
   if (!origin) return false;
   return col >= origin.c && col < origin.c + TURRET_SIZE && row >= origin.r && row < origin.r + TURRET_SIZE;
-}
-
-/** The heart of the hull. A block here soaks first; an empty heart takes core damage. */
-export function isCoreCell(row: number, col: number, cols = GRID_COLS, rows = GRID_ROWS, hull = "standard"): boolean {
-  const spec = getHull(hull);
-  if (spec) return row === spec.core.r && col === spec.core.c;
-  const origin = cols === GRID_COLS && rows === GRID_ROWS
-    ? HULLS[0].turret
-    : { c: Math.floor((cols - TURRET_SIZE) / 2), r: Math.floor((rows - TURRET_SIZE) / 2) };
-  if (!origin) return false;
-  return row === origin.r + 1 && col === origin.c + 1;
 }
 
 export type PartRole = "single" | "front" | "mid" | "rear" | "nw" | "ne" | "sw" | "se";
@@ -395,9 +418,30 @@ export function gridHasModules(grid: ReadonlyArray<ReadonlyArray<string | null>>
   return grid.some((row) => row.some((cell) => moduleIdOf(cell)));
 }
 
+/** Why this layout cannot start a fight, or null when it has a weapon and a power block. */
+export function outfitProblem(grid: ReadonlyArray<ReadonlyArray<string | null>>): string | null {
+  let weapons = 0;
+  let power = 0;
+  for (let r = 0; r < grid.length; r += 1) {
+    for (let c = 0; c < (grid[r]?.length ?? 0); c += 1) {
+      const token = grid[r][c];
+      if (!isAnchorCell(token, r, c)) continue;
+      const mod = getModule(moduleIdOf(token) ?? "");
+      if (!mod) continue;
+      if (mod.kind === "weapon") weapons += 1;
+      if (mod.kind === "power") power += 1;
+    }
+  }
+  if (weapons > 0 && power > 0) return null;
+  if (weapons === 0 && power === 0) return "Mount a weapon and a power block before you fight.";
+  if (weapons === 0) return "Mount a weapon before you fight.";
+  return "Mount a power block before you fight.";
+}
+
 /**
  * 5 wide × 7 long. Row 0 is the front, so the long axis is the direction the hull drives and hull guns fire.
- * The starter hull ships with a working loadout. Every other hull starts blank; the core is a cell, not a block.
+ * The starter hull ships with a working loadout, including a weapon and a power block.
+ * Every other hull starts blank. A tank falls when its last weapon or its last power block is gone.
  * Standard turret is rows 2–4. Rear turret is rows 4–6.
  */
 export function createDefaultGrid(hull = "standard"): (string | null)[][] {

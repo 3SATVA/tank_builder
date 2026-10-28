@@ -11,7 +11,6 @@ import {
   hullsFor,
   hasTurret,
   isAnchorCell,
-  isCoreCell,
   isTurretCell,
   moduleIdOf,
   modulesFor,
@@ -170,7 +169,6 @@ function buildStage(
       const turret = isTurretCell(r, c, cols, rows, save.hull);
       const cell = el("button", mod ? "cell filled" : "cell empty");
       if (turret) cell.classList.add("turret");
-      if (isCoreCell(r, c, cols, rows, save.hull)) cell.classList.add("core");
       const anchor = isAnchorCell(token, r, c);
       const role = partRole(token, r, c);
       if (mod?.id === "medium-cannon") cell.classList.add(anchor ? "medium-front" : "medium-rear");
@@ -234,7 +232,7 @@ function hint(hull: string): HTMLElement {
   return el(
     "p",
     "hint",
-    `Pick a block, tap a bay to place it. Tap the same block to pull it off, or a different one to replace it. A long gun takes this bay and the cells behind it. A 2×2 part takes a square. Every cell has to sit on the hull or inside the turret, and a multi-cell part cannot cover the core. ${turret} A shot through an empty core bay hits the core.`,
+    `Pick a block, tap a bay to place it. Tap the same block to pull it off, or a different one to replace it. A long gun takes this bay and the cells behind it. A 2×2 part takes a square. Every cell of a part has to sit on the hull or inside the turret. ${turret} A shot hurts the block it hits. The tank falls when every weapon is gone, or every power block is gone.`,
   );
 }
 
@@ -267,6 +265,8 @@ function moduleFace(mod: ModuleDef, role: PartRole = "single"): HTMLElement {
     return mountSprite(mod.id, 5, { rear: role === "rear", mid: role === "mid", quad });
   }
   if (mod.id === "heavy-cannon") return heavyFace(role);
+  if (mod.id === "harpoon") return harpoonFace(role);
+  if (mod.cutter) return sawFace();
   if (mod.id === "robot-bay") return bayFace(role);
   if (mod.id === "shield-gen") return shieldFace(role);
   if (mod.id === "medium-cannon") {
@@ -310,6 +310,23 @@ function heavyFace(role: PartRole): HTMLElement {
   return face;
 }
 
+function harpoonFace(role: PartRole): HTMLElement {
+  if (role === "rear") {
+    const face = el("span", "cannon-face harpoon rear");
+    face.append(el("span", "reel"));
+    return face;
+  }
+  const face = el("span", "cannon-face harpoon");
+  face.append(el("span", "spear"), el("span", "barb"), el("span", "breech"));
+  return face;
+}
+
+function sawFace(): HTMLElement {
+  const face = el("span", "saw-face");
+  face.append(el("span", "blade"), el("span", "hub"));
+  return face;
+}
+
 function bayFace(role: PartRole): HTMLElement {
   const face = el("span", `bay-face seg-${role}`);
   face.append(el("span", "hatch"));
@@ -320,7 +337,7 @@ function bayFace(role: PartRole): HTMLElement {
 function shieldFace(role: PartRole): HTMLElement {
   const face = el("span", `shield-face seg-${role}`);
   face.append(el("span", "emitter"));
-  if (role === "nw" || role === "single") face.append(el("span", "core-glow"));
+  if (role === "nw" || role === "single") face.append(el("span", "hub"));
   return face;
 }
 
@@ -362,7 +379,6 @@ function statPanel(stats: TankStats): HTMLElement {
   panel.append(el("h2", undefined, "Combined"));
   const list = el("dl", "stat-list");
   const rows: [string, number, number, string][] = [
-    ["Core", stats.hp, 140, String(Math.round(stats.hp))],
     ["Plates", stats.plates, 16, String(stats.plates)],
     ["Speed", stats.speed, 250, String(Math.round(stats.speed))],
     ["Turning", stats.turn, 250, String(Math.round(stats.turn))],

@@ -1,7 +1,7 @@
 import { mountBattle } from "./battle";
 import { applyArtStyle } from "./config";
 import { getBot } from "./bots";
-import { gridHasModules } from "./modules";
+import { outfitProblem } from "./modules";
 import { activeLayout, loadSave, saveGame } from "./save";
 import { renderBots, renderGarage, renderMenu, renderShop, type ScreenId } from "./screens";
 import { unlockAudio } from "./sfx";
@@ -51,8 +51,9 @@ function show(screen: ScreenId, botId?: string): void {
     show("bots");
     return;
   }
-  if (!gridHasModules(activeLayout(save))) {
-    outfitNote = "Mount at least one block before you fight.";
+  const blocked = outfitProblem(activeLayout(save));
+  if (blocked) {
+    outfitNote = blocked;
     show("garage");
     return;
   }

@@ -1,4 +1,4 @@
-import { blockPlate, getModule, isCoreCell, isTurretCell, moduleIdOf } from "./modules";
+import { blockPlate, getModule, isTurretCell, moduleIdOf } from "./modules";
 
 export type Grid = (string | null)[][];
 
@@ -43,7 +43,7 @@ export function canPlace(grid: Grid, hull: string, moduleId: string, row: number
 /**
  * Place `moduleId` on the tapped cell, swapping out whatever is already there.
  * The same block type still comes off. A multi-cell part has to sit entirely on
- * the hull or entirely inside the turret, and it cannot cover the core cell.
+ * the hull or entirely inside the turret.
  * Overlapping an existing multi-cell part removes that whole part first.
  */
 export function commitPlacement(grid: Grid, hull: string, moduleId: string, row: number, col: number): boolean {
@@ -59,7 +59,6 @@ export function commitPlacement(grid: Grid, hull: string, moduleId: string, row:
   if (cells.some((cell) => cell.r < 0 || cell.c < 0 || cell.r >= rows || cell.c >= cols)) return false;
   const flags = cells.map((cell) => isTurretCell(cell.r, cell.c, cols, rows, hull));
   if (flags.some(Boolean) && !flags.every(Boolean)) return false;
-  if (cells.length > 1 && cells.some((cell) => isCoreCell(cell.r, cell.c, cols, rows, hull))) return false;
   const seen = new Set<string>();
   for (const cell of cells) {
     const token = grid[cell.r][cell.c];
@@ -107,7 +106,7 @@ export interface RepairJob {
   rebuild: boolean;
 }
 
-/** Lowest remaining plate first. A destroyed blueprint part is the fallback. Never the core. */
+/** Lowest remaining plate first. A destroyed blueprint part is the fallback. */
 export function nextRepair(grid: Grid, plate: number[][], blueprint: Grid): RepairJob | null {
   let best: { cells: { r: number; c: number }[]; fraction: number } | null = null;
   for (let r = 0; r < grid.length; r += 1) {

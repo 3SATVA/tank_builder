@@ -1,6 +1,6 @@
 import { createBotController, type BotTuning, type ShotView, type TankCommands } from "./control";
 import { el } from "./dom";
-import { CELL, cellCenter, listGuns } from "./geometry";
+import { CELL, cellCenter, listGuns, pushBox, pushCircleFromBox, type OrientedBox } from "./geometry";
 import { applyRepair, damageInstance, nextRepair } from "./grid";
 import { attachInput, type InputController } from "./input";
 import { readArtStyle } from "./config";
@@ -15,7 +15,6 @@ import {
   getModule,
   hasTurret,
   isAnchorCell,
-  isCoreCell,
   isTurretCell,
   moduleIdOf,
   partRole,
@@ -28,7 +27,10 @@ import { computeStats, fuelDrainPerSecond, maxDriveSpeed, maxTurnRate } from "./
 import type { ModuleKind } from "./types";
 
 const TURRET_TURN = 4.6;
-const LAVA_DPS = 18;
+const LAVA_DPS = 16;
+const CUTTER_DPS = 28;
+const HARPOON_PULL = 240;
+const HARPOON_TIME = 1.15;
 /** Shield HP added by each generator. Recharge rate also scales with the count. */
 const SHIELD_HP = 80;
 const SHIELD_DELAY = 3.5;
@@ -73,8 +75,6 @@ interface Tank {
   turret: number;
   vx: number;
   vy: number;
-  core: number;
-  coreMax: number;
   fuel: number;
   cooldown: number;
   flash: number;
@@ -118,6 +118,12 @@ interface Shot {
   life: number;
   owner: Side;
   color: string;
+  hook?: boolean;
+}
+
+interface Tether {
+  owner: Side;
+  life: number;
 }
 
 interface Particle {
@@ -160,15 +166,19 @@ interface TankDebug {
   y: number;
   angle: number;
   turret: number;
-  core: number;
   fuel: number;
+  weapons: number;
+  power: number;
   speed: number;
   shots: number;
   phase: "play" | "win" | "lose";
   guns: Array<"hull" | "turret">;
   modules: number;
-  rivalCore: number;
+  rivalWeapons: number;
+  rivalPower: number;
   rivalModules: number;
+  tether: number;
+  overlap: boolean;
   rivalTurret: number;
   rivalX: number;
   rivalY: number;
@@ -208,22 +218,12 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   const exit = el("button", "btn btn-ghost hud-exit", "Menu");
   exit.type = "button";
   const readout = el("div", "hud-readout");
-  const coreLabel = el("div", "meter-label");
-  coreLabel.append(el("span", undefined, "Core"), el("span", "meter-value", ""));
-  const coreMeter = el("div", "meter meter-hp");
-  const coreFill = el("span");
-  coreMeter.append(coreFill);
   const fuelLabel = el("div", "meter-label");
   fuelLabel.append(el("span", undefined, "Fuel"), el("span", "meter-value", ""));
   const fuelMeter = el("div", "meter meter-fuel");
   const fuelFill = el("span");
   fuelMeter.append(fuelFill);
-  const rivalLabel = el("div", "meter-label");
-  rivalLabel.append(el("span", undefined, options.rivalName), el("span", "meter-value", ""));
-  const rivalMeter = el("div", "meter meter-rival");
-  const rivalFill = el("span");
-  rivalMeter.append(rivalFill);
-  readout.append(coreLabel, coreMeter, fuelLabel, fuelMeter, rivalLabel, rivalMeter);
+  readout.append(fuelLabel, fuelMeter);
   const scrap = el("div", "scrap-pill hud-scrap");
   const scrapValue = el("span", undefined, "");
   scrap.append(el("span", "scrap-nut", "⬡"), scrapValue);
@@ -294,6 +294,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   let camAngle = 0;
   let shots: Shot[] = [];
   let drones: Drone[] = [];
+  let tether: Tether | null = null;
   let particles: Particle[] = [];
   let floaters: Floater[] = [];
   let lastVolley: TankDebug["lastVolley"] = [];
@@ -315,6 +316,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     rival = spawnTank("rival", options.rivalName, options.rivalGrid, map.spawnB.x, map.spawnB.y, Math.PI, options.rivalHull);
     shots = [];
     drones = [];
+    tether = null;
     particles = [];
     floaters = [];
     shake = 0;
@@ -338,6 +340,9 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     stepTank(player, playerCmd, dt);
     stepTank(rival, rivalCmd, dt);
     stepDrones(dt);
+    stepTether(dt);
+    separateBodies();
+    stepCutters(dt);
     if (defeated(player)) finish("lose");
     else if (defeated(rival)) finish("win");
     if (phase !== "play") {
@@ -345,7 +350,6 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       syncHud();
       return;
     }
-    separateTanks();
 
     for (let i = shots.length - 1; i >= 0; i -= 1) {
       const shot = shots[i];
@@ -399,10 +403,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     const solved = resolveTank(map, tank.x, tank.y, tank.radius);
     tank.x = solved.x;
     tank.y = solved.y;
-    if (hitsHazard(map, tank.x, tank.y, tank.radius * 0.72)) {
-      tank.core -= absorb(tank, LAVA_DPS * dt);
-      tank.flash = Math.max(tank.flash, 0.1);
-    }
+    scorch(tank, dt);
     if (!hasTurret(tank.hull)) tank.turret = tank.angle;
     else if (cmd.aimAngle !== null) tank.turret = rotateToward(tank.turret, cmd.aimAngle, TURRET_TURN * dt);
     tank.flash = Math.max(0, tank.flash - dt);
@@ -440,29 +441,32 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     const guns = listGuns(tank.grid, tank.hull);
     for (const gun of guns) {
       const angle = gun.mount === "turret" ? tank.turret : tank.angle;
-      const reach = gun.siege ? 2.35 : gun.heavy ? 1.7 : 0.95;
+      const reach = gun.hook ? 1.35 : gun.siege ? 2.35 : gun.heavy ? 1.7 : 0.95;
       const muzzle = mountPoint(tank, gun.lx, gun.ly - CELL * reach, gun.mount === "turret");
-      const speed = gun.siege ? 470 : 540;
+      const speed = gun.hook ? 460 : gun.siege ? 470 : 540;
       shots.push({
         x: muzzle.x,
         y: muzzle.y,
         vx: Math.sin(angle) * speed,
         vy: -Math.cos(angle) * speed,
-        r: gun.siege ? 8.2 : gun.heavy ? 6.4 : 4.5,
+        r: gun.hook ? 3.2 : gun.siege ? 8.2 : gun.heavy ? 6.4 : 4.5,
         damage: gun.damage,
         life: gun.life,
         owner: tank.id,
-        color: gun.siege
-          ? tank.id === "player"
-            ? PAL.gold
-            : PAL.amber
-          : gun.heavy
+        hook: gun.hook,
+        color: gun.hook
+          ? PAL.cream
+          : gun.siege
             ? tank.id === "player"
-              ? PAL.cyan
-              : PAL.cream
-            : tank.id === "player"
-              ? PAL.teal
-              : PAL.orange,
+              ? PAL.gold
+              : PAL.amber
+            : gun.heavy
+              ? tank.id === "player"
+                ? PAL.cyan
+                : PAL.cream
+              : tank.id === "player"
+                ? PAL.teal
+                : PAL.orange,
       });
     }
     if (tank.id === "player") {
@@ -484,7 +488,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     for (let r = 0; r < rows; r += 1) {
       for (let c = 0; c < cols; c += 1) {
         const turret = isTurretCell(r, c, cols, rows, tank.hull);
-        if (!shotInCell(tank, shot, r, c)) continue;
+        if (!tank.grid[r][c] || !shotInCell(tank, shot, r, c)) continue;
         const center = cellCenter(c, r, cols, rows);
         const world = mountPoint(tank, center.x, center.y, turret);
         const dist = Math.hypot(shot.x - world.x, shot.y - world.y);
@@ -497,25 +501,14 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       damage = absorb(tank, damage);
       if (damage <= 0) {
         const edge = shieldRadius(tank);
-        burst(tank.x + (shot.x - tank.x) / edge * 8, tank.y + (shot.y - tank.y) / edge * 8, PAL.cyan, 5);
+        burst(tank.x + ((shot.x - tank.x) / edge) * 8, tank.y + ((shot.y - tank.y) / edge) * 8, PAL.cyan, 5);
         return true;
       }
     }
     if (!best) return bubble;
-    if (tank.grid[best.r][best.c]) {
-      hurtCell(tank, best.r, best.c, damage);
-      sfxHit();
-      return true;
-    }
-    const core = isCoreCell(best.r, best.c, cols, rows, tank.hull);
-    if (!best.turret && !core) return bubble;
-    tank.core -= damage;
-    tank.flash = 0.12;
+    hurtCell(tank, best.r, best.c, damage);
+    if (shot.hook) tether = { owner: shot.owner, life: HARPOON_TIME };
     sfxHit();
-    const center = cellCenter(best.c, best.r, cols, rows);
-    const world = mountPoint(tank, center.x, center.y, best.turret);
-    floaters.push({ x: world.x, y: world.y, text: "Core hit", life: 0.7 });
-    if (!reduceMotion) shake = Math.min(8, shake + (tank.id === "player" ? 3 : 1));
     return true;
   }
 
@@ -523,7 +516,6 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     const mod = cellModule(tank.grid[row][col]);
     const hit = damageInstance(tank.grid, tank.plate, row, col, amount);
     tank.flash = 0.08;
-    if (hit.overflow > 0) tank.core -= hit.overflow;
     if (!hit.popped) return;
     const cols = tank.grid[0]?.length ?? 1;
     const rows = tank.grid.length;
@@ -583,10 +575,19 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
         pen.translate(shot.x, shot.y);
         pen.rotate(Math.atan2(shot.vy, shot.vx));
         pen.fillStyle = shot.color;
-        const length = 8 + shot.r * 1.7;
-        const thick = Math.max(4, shot.r * 0.72);
-        traceRoundRect(pen, -length, -thick / 2, length + 4, thick, 3);
+        const length = shot.hook ? 26 : 8 + shot.r * 1.7;
+        const thick = shot.hook ? 3 : Math.max(4, shot.r * 0.72);
+        traceRoundRect(pen, -length, -thick / 2, length + 4, thick, shot.hook ? 1 : 3);
         pen.fill();
+        if (shot.hook) {
+          pen.fillStyle = PAL.gold;
+          pen.beginPath();
+          pen.moveTo(4, 0);
+          pen.lineTo(-2, -5);
+          pen.lineTo(-2, 5);
+          pen.closePath();
+          pen.fill();
+        }
         pen.restore();
       }
       for (const bit of particles) {
@@ -632,6 +633,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       artText(floater.text, floater.x, floater.y, view, PAL.paper);
     }
     for (const tank of [rival, player]) drawTankLabel(tank, view);
+    drawPixelTether(view);
     drawArrow(view);
   }
 
@@ -664,11 +666,6 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     context.fillText(tank.name, ax + 1, ay + 1);
     context.fillStyle = PAL.paper;
     context.fillText(tank.name, ax, ay);
-    const bar = view.cellPx * 2;
-    context.fillStyle = PAL.shadow;
-    context.fillRect(ax - bar / 2, ay + 4, bar, 3);
-    context.fillStyle = tank.id === "player" ? PAL.green : PAL.red;
-    context.fillRect(ax - bar / 2, ay + 4, Math.round(bar * clamp(tank.core / tank.coreMax, 0, 1)), 3);
   }
 
   function drawArrow(view: Frame): void {
@@ -878,17 +875,13 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
         pen.lineWidth = mod?.id === "heavy-armor" ? 3.5 : 2;
         pen.strokeStyle = mod?.id === "heavy-armor" ? "#1a222c" : "#0e1116";
         pen.stroke();
-        if (isCoreCell(r, c, cols, rows, tank.hull)) {
-          pen.fillStyle = "#ff5d5d";
-          pen.beginPath();
-          pen.arc(x + size - 5, y + size - 5, 2.4, 0, Math.PI * 2);
-          pen.fill();
-        }
         if (!id || !mod) continue;
         const moving = Math.hypot(tank.vx, tank.vy) > 18;
         const role = partRole(id, r, c);
         if (mod.kind === "weapon") {
-          if (mod.id === "heavy-cannon") drawSmoothHeavy(center.x, center.y, size, role, tank.muzzle > 0 && role === "front");
+          if (mod.hook) drawSmoothHarpoon(center.x, center.y, size, role, tank.muzzle > 0 && role === "front");
+          else if (mod.cutter) drawSmoothCutter(center.x, center.y, size);
+          else if (mod.id === "heavy-cannon") drawSmoothHeavy(center.x, center.y, size, role, tank.muzzle > 0 && role === "front");
           else if (mod.id === "medium-cannon" && role === "rear") drawSmoothBreech(center.x, center.y, size);
           else drawSmoothCannon(center.x, center.y, size, tank.muzzle > 0, (mod.rows ?? 1) > 1);
         } else if (mod.drone) drawSmoothBay(center.x, center.y, size, role);
@@ -976,6 +969,76 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       pen.arc(0, -half - length * 0.7, size * 0.14, 0, Math.PI * 2);
       pen.fill();
     }
+    pen.restore();
+  }
+
+  function drawSmoothHarpoon(x: number, y: number, size: number, role: PartRole, flash: boolean): void {
+    const half = size / 2;
+    pen.save();
+    pen.translate(x, y);
+    pen.strokeStyle = "#0e1116";
+    pen.lineWidth = 2;
+    if (role === "rear") {
+      pen.fillStyle = "#6a5a48";
+      pen.beginPath();
+      pen.arc(0, 0, half * 0.62, 0, Math.PI * 2);
+      pen.fill();
+      pen.stroke();
+      pen.strokeStyle = "#c8b090";
+      pen.lineWidth = 3;
+      pen.beginPath();
+      pen.arc(0, 0, half * 0.34, 0.4, 4.2);
+      pen.stroke();
+      pen.fillStyle = "#2a241c";
+      pen.beginPath();
+      pen.arc(0, 0, half * 0.16, 0, Math.PI * 2);
+      pen.fill();
+    } else {
+      pen.fillStyle = "#c8b090";
+      pen.fillRect(-2.2, -half - size * 1.15, 4.4, size * 1.35);
+      pen.strokeRect(-2.2, -half - size * 1.15, 4.4, size * 1.35);
+      pen.fillStyle = flash ? "#fff1c2" : "#f4ecd4";
+      pen.beginPath();
+      pen.moveTo(0, -half - size * 1.45);
+      pen.lineTo(7, -half - size * 1.05);
+      pen.lineTo(-7, -half - size * 1.05);
+      pen.closePath();
+      pen.fill();
+      pen.stroke();
+      pen.fillStyle = "#3a3028";
+      traceRoundRect(pen, -half * 0.7, half * 0.05, half * 1.4, half * 0.7, 2);
+      pen.fill();
+      pen.stroke();
+    }
+    pen.restore();
+  }
+
+  function drawSmoothCutter(x: number, y: number, size: number): void {
+    pen.save();
+    pen.translate(x, y);
+    pen.rotate(simTime * 9);
+    pen.fillStyle = "#d7deea";
+    pen.strokeStyle = "#0e1116";
+    pen.lineWidth = 2;
+    pen.beginPath();
+    pen.arc(0, 0, size * 0.34, 0, Math.PI * 2);
+    pen.fill();
+    pen.stroke();
+    pen.fillStyle = "#3a3a48";
+    for (let i = 0; i < 8; i += 1) {
+      pen.rotate(Math.PI / 4);
+      pen.beginPath();
+      pen.moveTo(size * 0.16, -2);
+      pen.lineTo(size * 0.42, 0);
+      pen.lineTo(size * 0.16, 2);
+      pen.closePath();
+      pen.fill();
+    }
+    pen.fillStyle = "#f4ecd4";
+    pen.beginPath();
+    pen.arc(0, 0, size * 0.1, 0, Math.PI * 2);
+    pen.fill();
+    pen.stroke();
     pen.restore();
   }
 
@@ -1356,7 +1419,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
         const role = partRole(token, r, c);
         const quad = role === "ne" ? 1 : role === "sw" ? 2 : role === "se" ? 3 : 0;
         const art = moduleArt(id ?? "", {
-          flash: Boolean(id && (id === "cannon" || id === "medium-cannon" || id === "heavy-cannon") && anchor && tank.muzzle > 0),
+          flash: Boolean(id && (id === "cannon" || id === "medium-cannon" || id === "heavy-cannon" || id === "harpoon") && anchor && tank.muzzle > 0),
           puff: id === "engine" && moving && Math.floor(simTime * 8) % 2 === 0,
           rear: role === "rear",
           mid: role === "mid",
@@ -1370,13 +1433,6 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
         );
         const body = scaled.height - cell;
         ctx.drawImage(scaled, pad + c * cell, pad + r * cell - Math.max(0, body));
-        if (isCoreCell(r, c, cols, rows, tank.hull)) {
-          const pip = Math.max(4, Math.round(cell * 0.28));
-          ctx.fillStyle = PAL.red;
-          ctx.fillRect(pad + c * cell + cell - pip - 2, pad + r * cell + cell - pip - 2, pip, pip);
-          ctx.fillStyle = PAL.gold;
-          ctx.fillRect(pad + c * cell + cell - pip, pad + r * cell + cell - pip, Math.max(2, pip - 4), Math.max(2, pip - 4));
-        }
         if (tank.flash > 0 && ((r + c) % 2 === 0)) {
           ctx.fillStyle = PAL.white;
           ctx.fillRect(pad + c * cell + 2, pad + r * cell + 2, 2, 2);
@@ -1532,18 +1588,11 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   function syncHud(): void {
     const fixing = Boolean(nextRepair(player.grid, player.plate, player.blueprint)) && repairBays(player) > 0;
     const stats = computeStats(player.grid, { repairActive: fixing });
-    coreFill.style.width = `${clamp(player.core / player.coreMax, 0, 1) * 100}%`;
     fuelFill.style.width = `${stats.fuel > 0 ? clamp(player.fuel / stats.fuel, 0, 1) * 100 : 0}%`;
-    rivalFill.style.width = `${clamp(rival.core / rival.coreMax, 0, 1) * 100}%`;
-    const coreText = coreLabel.querySelector(".meter-value");
     const fuelText = fuelLabel.querySelector(".meter-value");
-    const rivalText = rivalLabel.querySelector(".meter-value");
-    if (coreText) coreText.textContent = String(Math.max(0, Math.ceil(player.core)));
     if (fuelText) fuelText.textContent = String(Math.ceil(player.fuel));
-    if (rivalText) rivalText.textContent = String(Math.max(0, Math.ceil(rival.core)));
-    coreMeter.classList.toggle("low", player.core / player.coreMax < 0.3);
     scrapValue.textContent = `${bank.toLocaleString()} scrap`;
-    const next = statusLine(stats.plates, stats.weaponCount, stats.fireRate);
+    const next = statusLine(stats.plates, stats.weaponCount, stats.fireRate, stats.salvoDamage);
     if (next !== lastStatus) {
       lastStatus = next;
       status.textContent = next;
@@ -1551,13 +1600,13 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     }
   }
 
-  function statusLine(plates: number, weapons: number, rate: number): string {
+  function statusLine(plates: number, weapons: number, rate: number, salvo: number): string {
     if (phase === "win") return "Rival down";
     if (phase === "lose") return "";
     if (player.fuel <= 0) return "Fuel empty — crawling";
     if (weapons === 0) return "No cannon left";
-    if (rate <= 0) return "Cannons unpowered";
-    if (plates === 0) return "Armor gone — core exposed";
+    if (rate <= 0 && salvo > 0) return "Cannons unpowered";
+    if (plates === 0) return "Armor gone";
     return "";
   }
 
@@ -1604,15 +1653,19 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       y: player.y,
       angle: player.angle,
       turret: player.turret,
-      core: player.core,
       fuel: player.fuel,
+      weapons: tally(player).weapons,
+      power: tally(player).power,
       speed: computeStats(player.grid, { repairActive: false }).speed,
       shots: shots.length,
       phase,
       guns: listGuns(player.grid, player.hull).map((gun) => gun.mount),
       modules: player.grid.flat().filter(Boolean).length,
-      rivalCore: rival.core,
+      rivalWeapons: tally(rival).weapons,
+      rivalPower: tally(rival).power,
       rivalModules: rival.grid.flat().filter(Boolean).length,
+      tether: tether?.life ?? 0,
+      overlap: pushBox(chassisBox(player), chassisBox(rival)) !== null,
       rivalTurret: rival.turret,
       rivalX: rival.x,
       rivalY: rival.y,
@@ -1643,21 +1696,219 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     if (import.meta.env.DEV && window.__TANK_DEBUG__) delete window.__TANK_DEBUG__;
   };
 
-  function separateTanks(): void {
-    const dx = rival.x - player.x;
-    const dy = rival.y - player.y;
-    const min = player.radius + rival.radius * 0.85;
-    const dist = Math.hypot(dx, dy);
-    if (dist <= 0 || dist >= min) return;
-    const push = (min - dist) / 2;
-    const nx = dx / dist;
-    const ny = dy / dist;
-    const a = resolveTank(map, player.x - nx * push, player.y - ny * push, player.radius);
-    const b = resolveTank(map, rival.x + nx * push, rival.y + ny * push, rival.radius);
-    player.x = a.x;
-    player.y = a.y;
-    rival.x = b.x;
-    rival.y = b.y;
+  function chassisBox(tank: Tank): OrientedBox {
+    const cols = tank.grid[0]?.length ?? 1;
+    const rows = tank.grid.length;
+    return { x: tank.x, y: tank.y, halfW: cols * CELL * 0.5, halfH: rows * CELL * 0.5, angle: tank.angle };
+  }
+
+  function turretBoxes(tank: Tank): OrientedBox[] {
+    const cols = tank.grid[0]?.length ?? 1;
+    const rows = tank.grid.length;
+    const boxes: OrientedBox[] = [];
+    for (let r = 0; r < rows; r += 1) {
+      for (let c = 0; c < cols; c += 1) {
+        if (!isTurretCell(r, c, cols, rows, tank.hull)) continue;
+        const center = cellCenter(c, r, cols, rows);
+        const world = mountPoint(tank, center.x, center.y, true);
+        boxes.push({ x: world.x, y: world.y, halfW: CELL * 0.46, halfH: CELL * 0.46, angle: tank.turret });
+      }
+    }
+    return boxes;
+  }
+
+  function cellBox(tank: Tank, row: number, col: number): OrientedBox {
+    const cols = tank.grid[0]?.length ?? 1;
+    const rows = tank.grid.length;
+    const turret = isTurretCell(row, col, cols, rows, tank.hull);
+    const center = cellCenter(col, row, cols, rows);
+    const world = mountPoint(tank, center.x, center.y, turret);
+    return { x: world.x, y: world.y, halfW: CELL * 0.5, halfH: CELL * 0.5, angle: turret ? tank.turret : tank.angle };
+  }
+
+  function shoveTank(tank: Tank, push: { x: number; y: number }): void {
+    tank.x += push.x;
+    tank.y += push.y;
+    const speed = tank.vx * push.x + tank.vy * push.y;
+    const len = Math.hypot(push.x, push.y) || 1;
+    if (speed > 0) {
+      tank.vx -= (push.x / len) * speed;
+      tank.vy -= (push.y / len) * speed;
+    }
+  }
+
+  function separateBodies(): void {
+    for (let pass = 0; pass < 4; pass += 1) {
+      const hullPush = pushBox(chassisBox(player), chassisBox(rival));
+      if (hullPush) {
+        shoveTank(player, { x: -hullPush.x * 0.5, y: -hullPush.y * 0.5 });
+        shoveTank(rival, { x: hullPush.x * 0.5, y: hullPush.y * 0.5 });
+      }
+      for (const box of turretBoxes(player)) {
+        const push = pushBox(box, chassisBox(rival));
+        if (push) {
+          shoveTank(player, { x: -push.x * 0.5, y: -push.y * 0.5 });
+          shoveTank(rival, { x: push.x * 0.5, y: push.y * 0.5 });
+        }
+      }
+      for (const box of turretBoxes(rival)) {
+        const push = pushBox(chassisBox(player), box);
+        if (push) {
+          shoveTank(player, { x: -push.x * 0.5, y: -push.y * 0.5 });
+          shoveTank(rival, { x: push.x * 0.5, y: push.y * 0.5 });
+        }
+      }
+      for (const drone of drones) {
+        if (drone.hp <= 0) continue;
+        for (const tank of [player, rival]) {
+          const boxes = [chassisBox(tank), ...turretBoxes(tank)];
+          for (const box of boxes) {
+            const push = pushCircleFromBox(drone.x, drone.y, drone.radius, box);
+            if (!push) continue;
+            drone.x += push.x;
+            drone.y += push.y;
+          }
+        }
+      }
+      for (let i = 0; i < drones.length; i += 1) {
+        for (let j = i + 1; j < drones.length; j += 1) {
+          const a = drones[i];
+          const b = drones[j];
+          if (!a || !b || a.hp <= 0 || b.hp <= 0) continue;
+          nudgeApart(a, b, 2);
+        }
+      }
+      const solvedPlayer = resolveTank(map, player.x, player.y, player.radius);
+      const solvedRival = resolveTank(map, rival.x, rival.y, rival.radius);
+      player.x = solvedPlayer.x;
+      player.y = solvedPlayer.y;
+      rival.x = solvedRival.x;
+      rival.y = solvedRival.y;
+      for (const drone of drones) {
+        const solved = resolveTank(map, drone.x, drone.y, drone.radius);
+        drone.x = solved.x;
+        drone.y = solved.y;
+      }
+    }
+  }
+
+  function scorch(tank: Tank, dt: number): void {
+    const rows = tank.grid.length;
+    const cols = tank.grid[0]?.length ?? 0;
+    const seen = new Set<string>();
+    let burned = false;
+    for (let r = 0; r < rows; r += 1) {
+      for (let c = 0; c < cols; c += 1) {
+        const token = tank.grid[r][c];
+        if (!token) continue;
+        const key = token.includes("@") ? token : `${r},${c}`;
+        if (seen.has(key)) continue;
+        const turret = isTurretCell(r, c, cols, rows, tank.hull);
+        const center = cellCenter(c, r, cols, rows);
+        const world = mountPoint(tank, center.x, center.y, turret);
+        if (!hitsHazard(map, world.x, world.y, CELL * 0.32)) continue;
+        seen.add(key);
+        const left = absorb(tank, LAVA_DPS * dt);
+        if (left > 0) hurtCell(tank, r, c, left);
+        burned = true;
+      }
+    }
+    if (burned) tank.flash = Math.max(tank.flash, 0.1);
+  }
+
+  function stepTether(dt: number): void {
+    if (!tether) return;
+    tether.life -= dt;
+    const owner = tether.owner === "player" ? player : rival;
+    const target = tether.owner === "player" ? rival : player;
+    if (tether.life <= 0 || !hasHarpoon(owner)) {
+      tether = null;
+      return;
+    }
+    const tip = harpoonTip(owner) ?? { x: owner.x, y: owner.y };
+    const dx = tip.x - target.x;
+    const dy = tip.y - target.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    const step = Math.min(HARPOON_PULL * dt, dist);
+    target.x += (dx / dist) * step;
+    target.y += (dy / dist) * step;
+    target.vx *= 0.55;
+    target.vy *= 0.55;
+  }
+
+  function stepCutters(dt: number): void {
+    const amount = CUTTER_DPS * dt;
+    for (const tank of [player, rival]) {
+      const foe = tank.id === "player" ? rival : player;
+      const rows = tank.grid.length;
+      const cols = tank.grid[0]?.length ?? 0;
+      for (let r = 0; r < rows; r += 1) {
+        for (let c = 0; c < cols; c += 1) {
+          if (!isAnchorCell(tank.grid[r][c], r, c) || !cellModule(tank.grid[r][c])?.cutter) continue;
+          const blade = cellBox(tank, r, c);
+          blade.halfW += 2;
+          blade.halfH += 2;
+          const seen = new Set<string>();
+          for (let fr = 0; fr < foe.grid.length; fr += 1) {
+            for (let fc = 0; fc < (foe.grid[fr]?.length ?? 0); fc += 1) {
+              const token = foe.grid[fr][fc];
+              if (!token || seen.has(token.includes("@") ? token : `${fr},${fc}`)) continue;
+              if (!pushBox(blade, cellBox(foe, fr, fc))) continue;
+              seen.add(token.includes("@") ? token : `${fr},${fc}`);
+              hurtCell(foe, fr, fc, amount);
+            }
+          }
+          for (const drone of drones) {
+            if (drone.hp <= 0 || drone.owner === tank.id) continue;
+            if (!pushCircleFromBox(drone.x, drone.y, drone.radius, blade)) continue;
+            hurtDrone(drone, amount);
+          }
+        }
+      }
+    }
+    for (let i = drones.length - 1; i >= 0; i -= 1) {
+      if ((drones[i]?.hp ?? 1) <= 0) drones.splice(i, 1);
+    }
+  }
+
+  function hasHarpoon(tank: Tank): boolean {
+    return tank.grid.some((row, r) => row.some((token, c) => isAnchorCell(token, r, c) && cellModule(token)?.hook));
+  }
+
+  function harpoonTip(tank: Tank): { x: number; y: number } | null {
+    const rows = tank.grid.length;
+    const cols = tank.grid[0]?.length ?? 0;
+    for (let r = 0; r < rows; r += 1) {
+      for (let c = 0; c < cols; c += 1) {
+        if (!isAnchorCell(tank.grid[r][c], r, c) || !cellModule(tank.grid[r][c])?.hook) continue;
+        const turret = isTurretCell(r, c, cols, rows, tank.hull);
+        const center = cellCenter(c, r, cols, rows);
+        return mountPoint(tank, center.x, center.y - CELL * 1.35, turret);
+      }
+    }
+    return null;
+  }
+
+  function drawPixelTether(view: Frame): void {
+    if (!tether || tether.life <= 0) return;
+    const owner = tether.owner === "player" ? player : rival;
+    const target = tether.owner === "player" ? rival : player;
+    const from = harpoonTip(owner) ?? { x: owner.x, y: owner.y };
+    const a = worldToArt(from.x, from.y, view);
+    const b = worldToArt(target.x, target.y, view);
+    const steps = 18;
+    const size = Math.max(5, Math.round(view.cellPx * 0.28));
+    for (let i = 0; i <= steps; i += 1) {
+      const t = i / steps;
+      const x = Math.round(a.x + (b.x - a.x) * t);
+      const y = Math.round(a.y + (b.y - a.y) * t);
+      context.fillStyle = PAL.shadow;
+      context.fillRect(x + 2, y + 2, size, size);
+      context.fillStyle = i % 2 === 0 ? PAL.gold : PAL.cream;
+      context.fillRect(x, y, size, size);
+    }
+    context.fillStyle = PAL.gold;
+    context.fillRect(Math.round(b.x) - size, Math.round(b.y) - size, size * 2, size * 2);
   }
 
   function stepDecor(dt: number): void {
@@ -1974,8 +2225,6 @@ function spawnTank(
     turret: angle,
     vx: 0,
     vy: 0,
-    core: stats.hp,
-    coreMax: stats.hp,
     fuel: stats.fuel,
     cooldown: 0.45,
     flash: 0,
@@ -2033,14 +2282,23 @@ function repairBays(tank: Tank): number {
   return count;
 }
 
-function hadModules(tank: Tank): boolean {
-  return tank.blueprint.some((row) => row.some((cell) => cell));
+function tally(tank: Tank): { weapons: number; power: number } {
+  let weapons = 0;
+  let power = 0;
+  tank.grid.forEach((row, r) => {
+    row.forEach((token, c) => {
+      if (!isAnchorCell(token, r, c)) return;
+      const mod = cellModule(token);
+      if (mod?.kind === "weapon") weapons += 1;
+      if (mod?.kind === "power") power += 1;
+    });
+  });
+  return { weapons, power };
 }
 
 function defeated(tank: Tank): boolean {
-  if (tank.core <= 0) return true;
-  if (!hadModules(tank)) return false;
-  return !tank.grid.some((row) => row.some((cell) => cell));
+  const counts = tally(tank);
+  return counts.weapons === 0 || counts.power === 0;
 }
 
 function turretPivot(cols: number, rows: number, hull: string): { x: number; y: number } | null {

@@ -20,6 +20,10 @@ const BY_ID: Record<string, string> = {
   "robot-bay":
     '<rect x="3.5" y="3.5" width="17" height="17" rx="1"/><path d="M8 14.5h8v4.2H8z"/><path d="M10.6 14.5V8.2h2.8v6.3"/>',
   "shield-gen": '<circle cx="12" cy="12" r="8"/><path d="M12 7.2v9.6M8.4 12h7.2"/>',
+  harpoon:
+    '<path d="M12 2.2 8.2 7.2h2.2V14H13.6V7.2H15.8L12 2.2z"/><path d="M7 15.2h10v4.2H7z"/><path d="M9.2 15.2V11h5.6v4.2"/>',
+  cutter:
+    '<circle cx="12" cy="12" r="6.2"/><path d="M12 4.2v2.4M12 17.4v2.4M4.2 12h2.4M17.4 12h2.4M6.4 6.4l1.7 1.7M15.9 15.9l1.7 1.7M17.6 6.4l-1.7 1.7M8.1 15.9l-1.7 1.7"/><circle cx="12" cy="12" r="1.6"/>',
 };
 
 export function iconSvg(kind: ModuleKind, id?: string): string {
