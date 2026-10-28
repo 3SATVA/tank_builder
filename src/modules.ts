@@ -33,8 +33,8 @@ export const MODULES: readonly ModuleDef[] = [
     name: "Power",
     starter: true,
     color: PAL.gold,
-    blurb: "+2 power",
-    stats: { power: 2 },
+    blurb: "+3 power",
+    stats: { power: 3 },
   },
   {
     id: "fuel",

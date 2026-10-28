@@ -9,7 +9,6 @@ import {
   getHull,
   getModule,
   hullsFor,
-  hasTurret,
   isAnchorCell,
   isTurretCell,
   moduleIdOf,
@@ -33,7 +32,44 @@ import { sfxTap } from "./sfx";
 import { cellPowered, computeStats, mobilityWarning, powerPlan } from "./stats";
 import type { ModuleDef, SaveData, ShopItem, TankStats } from "./types";
 
-export type ScreenId = "menu" | "garage" | "battle" | "shop" | "bots" | "pvp" | "board";
+export type ScreenId = "garage" | "battle" | "shop" | "campaign" | "pvp" | "board";
+export type TabId = "shop" | "garage" | "campaign" | "pvp";
+
+const TABS: readonly { id: TabId; icon: string; label: string }[] = [
+  { id: "shop", icon: "🛒", label: "Shop" },
+  { id: "garage", icon: "🔧", label: "Garage" },
+  { id: "campaign", icon: "⚔️", label: "Campaign" },
+  { id: "pvp", icon: "🏆", label: "PvP" },
+];
+
+export function renderTabs(onPick: (id: TabId) => void): { element: HTMLElement; setActive: (id: TabId | null) => void } {
+  const bar = el("nav", "tab-bar");
+  bar.setAttribute("aria-label", "Main");
+  const buttons = new Map<TabId, HTMLButtonElement>();
+  for (const tab of TABS) {
+    const button = el("button", "tab");
+    button.type = "button";
+    button.dataset.tab = tab.id;
+    button.append(el("span", "tab-icon", tab.icon), el("span", "tab-label", tab.label));
+    button.addEventListener("click", () => {
+      sfxTap();
+      onPick(tab.id);
+    });
+    bar.append(button);
+    buttons.set(tab.id, button);
+  }
+  return {
+    element: bar,
+    setActive(id) {
+      for (const [key, button] of buttons) {
+        const on = key === id;
+        button.classList.toggle("selected", on);
+        if (on) button.setAttribute("aria-current", "page");
+        else button.removeAttribute("aria-current");
+      }
+    },
+  };
+}
 
 function scrapLabel(amount: number): string {
   return `${amount.toLocaleString()} scrap`;
@@ -43,60 +79,6 @@ function scrapPill(amount: number): HTMLElement {
   const pill = el("div", "scrap-pill");
   pill.append(el("span", "scrap-nut", "⬡"), el("span", undefined, scrapLabel(amount)));
   return pill;
-}
-
-export function renderMenu(save: SaveData, go: (screen: ScreenId) => void): HTMLElement {
-  const root = el("div", "screen menu-screen");
-  const bar = el("header", "topbar");
-  bar.append(el("span", "brand", "Tank Builder"), scrapPill(save.currency));
-
-  const hero = el("div", "menu-hero");
-  hero.append(logoTank(), heroCopy());
-
-  const actions = el("div", "menu-actions");
-  actions.append(
-    menuButton("Garage", "Build and refit the hull", () => go("garage")),
-    menuButton("Battle", "Pick a rival and duel", () => go("bots"), true),
-    menuButton("PvP", "Fight another pilot's tank", () => go("pvp")),
-    menuButton("Shop", "Spend scrap on new blocks", () => go("shop")),
-  );
-
-  root.append(bar, hero, actions);
-  return root;
-}
-
-function heroCopy(): HTMLElement {
-  const copy = el("div", "hero-copy");
-  copy.append(
-    el("p", "eyebrow", "Top-down workshop"),
-    el("h1", undefined, "Stack a tank. Drive it."),
-    el(
-      "p",
-      "lede",
-      "Fill the hull and the gold 3×3 turret with armor, tracks, fuel, power, engines, and cannons. The duel uses whatever you bolt on.",
-    ),
-  );
-  return copy;
-}
-
-function menuButton(title: string, detail: string, onClick: () => void, primary = false): HTMLButtonElement {
-  const button = el("button", primary ? "btn btn-primary menu-btn" : "btn menu-btn");
-  button.type = "button";
-  const label = el("span", "menu-btn-title", title);
-  const sub = el("span", "menu-btn-detail", detail);
-  button.append(label, sub);
-  button.addEventListener("click", () => {
-    sfxTap();
-    onClick();
-  });
-  return button;
-}
-
-function logoTank(): HTMLElement {
-  const logo = el("div", "logo-tank");
-  logo.setAttribute("aria-hidden", "true");
-  logo.append(el("div", "logo-barrel"), el("div", "logo-turret"), el("div", "logo-hull"));
-  return logo;
 }
 
 export function renderGarage(
@@ -119,18 +101,13 @@ export function renderGarage(
     const cols = grid[0]?.length ?? 1;
 
     const bar = el("header", "topbar");
-    const back = el("button", "btn btn-ghost", "Menu");
-    back.type = "button";
-    back.addEventListener("click", () => go("menu"));
     const drive = el("button", "btn btn-primary", "Battle");
     drive.type = "button";
     drive.addEventListener("click", () => {
       sfxTap();
       go("battle");
     });
-    const barActions = el("div", "topbar-actions");
-    barActions.append(back, drive);
-    bar.append(el("span", "brand", "Garage"), scrapPill(save.currency), barActions);
+    bar.append(el("span", "brand", "Garage"), scrapPill(save.currency), drive);
 
     const layout = el("div", "garage-layout");
     layout.append(
@@ -161,7 +138,7 @@ function buildStage(
   const plan = powerPlan(layout);
   const moveWarning = mobilityWarning(layout);
   const stage = el("section", "builder");
-  stage.append(el("h2", undefined, "Hull"), hullPicker(save, persist, paint), artStyleToggle(paint), hint(save.hull));
+  stage.append(el("h2", undefined, "Hull"), hullPicker(save, persist, paint), artStyleToggle(paint));
   if (note || moveWarning) {
     const warning = el("p", "battle-note", [note, moveWarning].filter(Boolean).join(" "));
     warning.setAttribute("role", "status");
@@ -236,39 +213,9 @@ function buildStage(
     persist();
     paint();
   });
-  const defend = el("button", "btn", "Set as PvP defense");
-  defend.type = "button";
-  const posted = el("p", "pvp-status", "");
-  posted.setAttribute("role", "status");
-  defend.addEventListener("click", () => {
-    sfxTap();
-    defend.disabled = true;
-    posted.textContent = "Posting defense…";
-    void publishDefense(save.hull, activeLayout(save))
-      .then((message) => {
-        posted.textContent = message;
-      })
-      .catch((err: unknown) => {
-        posted.textContent = err instanceof Error ? err.message : "Couldn't post the defense.";
-      })
-      .finally(() => {
-        defend.disabled = false;
-      });
-  });
-  tools.append(reset, defend, posted);
+  tools.append(reset);
   stage.append(wrap, tools);
   return stage;
-}
-
-function hint(hull: string): HTMLElement {
-  const turret = hasTurret(hull)
-    ? "The gold 3×3 rotates toward your aim. Guns on the hull fire the way the hull faces."
-    : "This hull has no turret, so every gun fires the way the hull faces. Hold the aim stick to shoot.";
-  return el(
-    "p",
-    "hint",
-    `Pick a block, tap a bay to place it. Tap the same block to pull it off, or a different one to replace it. A long gun takes this bay and the cells behind it. A 2×2 part takes a square. Every cell of a part has to sit on the hull or inside the turret. ${turret} A shot hurts the block it hits. The tank falls when every weapon is gone, or every power block is gone.`,
-  );
 }
 
 function hullPicker(save: SaveData, persist: () => void, paint: () => void): HTMLElement {
@@ -280,7 +227,6 @@ function hullPicker(save: SaveData, persist: () => void, paint: () => void): HTM
     button.type = "button";
     button.dataset.hull = hull.id;
     button.setAttribute("aria-pressed", hull.id === save.hull ? "true" : "false");
-    button.title = hull.blurb;
     button.addEventListener("click", () => {
       if (save.hull === hull.id) return;
       save.hull = hull.id;
@@ -501,13 +447,10 @@ function composition(save: SaveData): HTMLElement {
   return line;
 }
 
-export function renderBots(save: SaveData, go: (screen: ScreenId, botId?: string) => void): HTMLElement {
+export function renderCampaign(save: SaveData, go: (screen: ScreenId, botId?: string) => void): HTMLElement {
   const root = el("div", "screen shop-screen");
   const bar = el("header", "topbar");
-  const back = el("button", "btn btn-ghost", "Menu");
-  back.type = "button";
-  back.addEventListener("click", () => go("menu"));
-  bar.append(el("span", "brand", "Rivals"), scrapPill(save.currency), back);
+  bar.append(el("span", "brand", "Campaign"), scrapPill(save.currency));
 
   const body = el("div", "shop-body");
   const list = el("div", "bot-list");
@@ -541,7 +484,7 @@ export function renderBots(save: SaveData, go: (screen: ScreenId, botId?: string
       go("battle", bot.id);
     });
     foot.append(state, button);
-    card.append(top, el("p", "shop-tagline", bot.blurb), foot);
+    card.append(top, foot);
     list.append(card);
   }
   body.append(list);
@@ -549,15 +492,12 @@ export function renderBots(save: SaveData, go: (screen: ScreenId, botId?: string
   return root;
 }
 
-export function renderShop(save: SaveData, go: (screen: ScreenId) => void, persist: () => void): HTMLElement {
+export function renderShop(save: SaveData, persist: () => void): HTMLElement {
   const root = el("div", "screen shop-screen");
 
   const paint = (): void => {
     const bar = el("header", "topbar");
-    const back = el("button", "btn btn-ghost", "Menu");
-    back.type = "button";
-    back.addEventListener("click", () => go("menu"));
-    bar.append(el("span", "brand", "Shop"), scrapPill(save.currency), back);
+    bar.append(el("span", "brand", "Shop"), scrapPill(save.currency));
 
     const body = el("div", "shop-body");
     body.append(shopList(save, persist, paint));
@@ -595,7 +535,7 @@ function shopCard(save: SaveData, item: ShopItem, persist: () => void, paint: ()
     head.append(el("span", "swatch hull-mark", getHull(id)?.mark ?? "Hull"));
   }
   const copy = el("div", "shop-copy");
-  copy.append(el("h3", undefined, item.name), el("p", "shop-tagline", item.tagline));
+  copy.append(el("h3", undefined, item.name));
   head.append(copy);
   const foot = el("div", "shop-card-foot");
   foot.append(el("span", "shop-price", `${item.cost.toLocaleString()} scrap`));
@@ -613,34 +553,69 @@ function shopCard(save: SaveData, item: ShopItem, persist: () => void, paint: ()
   return card;
 }
 
+function tankPreview(save: SaveData): HTMLElement {
+  const layout = activeLayout(save);
+  const cols = layout[0]?.length ?? 1;
+  const rows = layout.length;
+  const plan = powerPlan(layout);
+  const wrap = el("div", "tank-preview");
+  wrap.setAttribute("role", "img");
+  wrap.setAttribute("aria-label", "Your tank");
+  const frame = el("div", "hull-frame");
+  const grid = el("div", "tank-grid");
+  grid.style.setProperty("--cols", String(cols));
+  layout.forEach((row, r) => {
+    row.forEach((token, c) => {
+      const mod = getModule(moduleIdOf(token) ?? "");
+      const turret = isTurretCell(r, c, cols, rows, save.hull);
+      const cell = el("div", mod ? "cell filled" : "cell empty");
+      if (turret) cell.classList.add("turret");
+      const anchor = isAnchorCell(token, r, c);
+      const role = partRole(token, r, c);
+      if (mod?.id === "medium-cannon") cell.classList.add(anchor ? "medium-front" : "medium-rear");
+      else if (mod?.id === "heavy-cannon") cell.classList.add("heavy-gun", `seg-${role}`);
+      else if (mod?.id === "robot-bay") cell.classList.add("robot", `seg-${role}`);
+      else if (mod?.id === "shield-gen") cell.classList.add("shield", `seg-${role}`);
+      else if (mod?.kind === "weapon") cell.classList.add("cannon");
+      if (mod?.kind === "engine") cell.classList.add("engine");
+      if (mod?.id === "heavy-armor") cell.classList.add("heavy");
+      if (mod?.id === "repair-bay") cell.classList.add("repair");
+      cell.style.setProperty("--cell", mod?.color ?? "transparent");
+      if (mod) cell.append(moduleFace(mod, role));
+      if (mod && !cellPowered(plan, token, r, c)) {
+        cell.classList.add("unpowered");
+        cell.append(el("span", "no-power"));
+      }
+      grid.append(cell);
+    });
+  });
+  frame.append(grid);
+  wrap.append(el("div", "front-flag", "Front"), frame);
+  return wrap;
+}
+
 export function renderPvp(save: SaveData, go: (screen: ScreenId) => void, onFight: (launch: PvpLaunch) => void): HTMLElement {
   const root = el("div", "screen shop-screen");
   const paint = (): void => {
     const identity = readIdentity();
     const bar = el("header", "topbar");
-    const back = el("button", "btn btn-ghost", "Menu");
-    back.type = "button";
-    back.addEventListener("click", () => go("menu"));
     const board = el("button", "btn", "Leaderboard");
     board.type = "button";
     board.addEventListener("click", () => {
       sfxTap();
       go("board");
     });
-    bar.append(el("span", "brand", "PvP"), board, back);
+    bar.append(el("span", "brand", "PvP"), scrapPill(save.currency), board);
 
     const body = el("div", "pvp-body");
     const rating = readRating();
-    const who = identity
-      ? `${identity.name} · ${rating === null ? "Unranked" : `rating ${rating}`}`
-      : "Pick a callsign to join the yard.";
-    body.append(el("p", "pvp-status", who));
-
     if (!identity) {
       body.append(callsignForm(paint));
     } else {
-      body.append(finder(save, onFight));
+      const who = el("p", "pvp-identity", `${identity.name} · ${rating === null ? "Unranked" : `rating ${rating}`}`);
+      body.append(who);
     }
+    body.append(tankPreview(save), finder(save, onFight));
     root.replaceChildren(bar, body);
   };
   paint();
@@ -684,9 +659,9 @@ function callsignForm(done: () => void): HTMLElement {
 
 function finder(save: SaveData, onFight: (launch: PvpLaunch) => void): HTMLElement {
   const wrap = el("div", "shop-list");
-  const find = el("button", "btn btn-primary", "Find opponent");
+  const find = el("button", "btn btn-primary battle-go", "Battle");
   find.type = "button";
-  const status = el("p", "pvp-status", "Find a posted defense, then fight it.");
+  const status = el("p", "pvp-status", "Posts this tank, then finds a rival.");
   status.setAttribute("role", "status");
   const slot = el("div");
   find.addEventListener("click", () => {

@@ -220,7 +220,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   canvas.setAttribute("aria-label", `${map.name} arena`);
 
   const hud = el("div", "hud");
-  const exit = el("button", "btn btn-ghost hud-exit", "Menu");
+  const exit = el("button", "btn btn-ghost hud-exit", "Back");
   exit.type = "button";
   const readout = el("div", "hud-readout");
   const fuelLabel = el("div", "meter-label");

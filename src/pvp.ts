@@ -208,6 +208,20 @@ export function readOpponentLayout(hullRaw: unknown, layoutRaw: unknown): { hull
   return { hull, grid };
 }
 
+let defenseTimer = 0;
+
+/** Posts the selected hull after a short pause. Skips quietly when offline, unsigned-in, or not fight-ready. */
+export function scheduleDefense(hull: string, grid: ReadonlyArray<ReadonlyArray<string | null>>): void {
+  const snapshot = grid.map((row) => row.slice());
+  window.clearTimeout(defenseTimer);
+  defenseTimer = window.setTimeout(() => {
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+    if (!readIdentity()) return;
+    if (outfitProblem(snapshot)) return;
+    void publishDefense(hull, snapshot).catch(() => {});
+  }, 800);
+}
+
 export async function publishDefense(hull: string, grid: ReadonlyArray<ReadonlyArray<string | null>>): Promise<string> {
   const identity = readIdentity();
   if (!identity) throw new Error("Choose a callsign under PvP first.");

@@ -2,9 +2,9 @@ import { mountBattle } from "./battle";
 import { applyArtStyle } from "./config";
 import { getBot } from "./bots";
 import { outfitProblem } from "./modules";
-import { PVP_SCRAP, ratingLine, reportResult, standInGrid, veteranTuning, type PvpLaunch } from "./pvp";
+import { PVP_SCRAP, ratingLine, reportResult, scheduleDefense, standInGrid, veteranTuning, type PvpLaunch } from "./pvp";
 import { activeLayout, loadSave, saveGame } from "./save";
-import { renderBots, renderGarage, renderLeaderboard, renderMenu, renderPvp, renderShop, type ScreenId } from "./screens";
+import { renderCampaign, renderGarage, renderLeaderboard, renderPvp, renderShop, renderTabs, type ScreenId, type TabId } from "./screens";
 import { unlockAudio } from "./sfx";
 import "./style.css";
 
@@ -14,6 +14,10 @@ applyArtStyle();
 const root = document.querySelector<HTMLElement>("#app");
 if (!root) throw new Error("Missing #app");
 const app: HTMLElement = root;
+const slot = document.createElement("div");
+slot.className = "app-slot";
+const tabs = renderTabs((id) => show(id));
+app.append(slot, tabs.element);
 
 const save = loadSave();
 let stopBattle: (() => void) | null = null;
@@ -23,6 +27,7 @@ let pvpLaunch: PvpLaunch | null = null;
 
 function persist(): void {
   saveGame(save);
+  scheduleDefense(save.hull, activeLayout(save));
 }
 
 function show(screen: ScreenId, botId?: string): void {
@@ -30,34 +35,32 @@ function show(screen: ScreenId, botId?: string): void {
   if (screen !== "battle") pvpLaunch = null;
   stopBattle?.();
   stopBattle = null;
+  const tab: TabId | null = screen === "board" ? "pvp" : screen === "battle" ? null : screen;
   document.body.classList.toggle("in-battle", screen === "battle");
-  if (screen === "menu") {
-    app.replaceChildren(renderMenu(save, show));
-    return;
-  }
+  tabs.setActive(tab);
   if (screen === "garage") {
     const note = outfitNote;
     outfitNote = "";
-    app.replaceChildren(renderGarage(save, show, persist, note));
+    slot.replaceChildren(renderGarage(save, show, persist, note));
     return;
   }
   if (screen === "shop") {
-    app.replaceChildren(renderShop(save, show, persist));
+    slot.replaceChildren(renderShop(save, persist));
     return;
   }
-  if (screen === "bots") {
-    app.replaceChildren(renderBots(save, show));
+  if (screen === "campaign") {
+    slot.replaceChildren(renderCampaign(save, show));
     return;
   }
   if (screen === "pvp") {
-    app.replaceChildren(renderPvp(save, show, (launch) => {
+    slot.replaceChildren(renderPvp(save, show, (launch) => {
       pvpLaunch = launch;
       show("battle");
     }));
     return;
   }
   if (screen === "board") {
-    app.replaceChildren(renderLeaderboard(show));
+    slot.replaceChildren(renderLeaderboard(show));
     return;
   }
   if (pvpLaunch) {
@@ -73,7 +76,7 @@ function show(screen: ScreenId, botId?: string): void {
       : { playerId: "", name: "Yard bot", hull: "standard", grid: standInGrid() };
     const host = document.createElement("div");
     host.className = "screen battle-screen";
-    app.replaceChildren(host);
+    slot.replaceChildren(host);
     stopBattle = mountBattle(host, {
       grid: activeLayout(save).map((row) => row.slice()),
       hull: save.hull,
@@ -101,7 +104,7 @@ function show(screen: ScreenId, botId?: string): void {
         }
         : undefined,
       rivalsLabel: "PvP",
-      onExit: () => show("menu"),
+      onExit: () => show("pvp"),
       onGarage: () => show("garage"),
       onRivals: () => show("pvp"),
     });
@@ -109,7 +112,7 @@ function show(screen: ScreenId, botId?: string): void {
   }
   const bot = getBot(opponentId);
   if (bot.index > save.botsBeaten) {
-    show("bots");
+    show("campaign");
     return;
   }
   const blocked = outfitProblem(activeLayout(save));
@@ -120,7 +123,7 @@ function show(screen: ScreenId, botId?: string): void {
   }
   const host = document.createElement("div");
   host.className = "screen battle-screen";
-  app.replaceChildren(host);
+  slot.replaceChildren(host);
   stopBattle = mountBattle(host, {
     grid: activeLayout(save).map((row) => row.slice()),
     hull: save.hull,
@@ -140,9 +143,9 @@ function show(screen: ScreenId, botId?: string): void {
         persist();
       }
     },
-    onExit: () => show("menu"),
+    onExit: () => show("campaign"),
     onGarage: () => show("garage"),
-    onRivals: () => show("bots"),
+    onRivals: () => show("campaign"),
   });
 }
 
@@ -168,4 +171,4 @@ function installZoomLock(): void {
 }
 
 window.addEventListener("pointerdown", () => unlockAudio());
-show("menu");
+show("campaign");
