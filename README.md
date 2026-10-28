@@ -11,7 +11,7 @@ npm run build
 ## Screens
 
 - **Garage** — tap a block in the palette, tap a bay to place it. Tap the same block to pull it off, or a different one to replace it. A medium cannon takes the bay you tap and the one behind it, and replaces whatever was in both as long as both are on the hull or both are inside the turret, and neither is the core. The top row is the front of the hull. The gold 3×3 is the turret; those bays are module slots too. A hull switcher lists the chassis you own, and each hull keeps its own layout.
-- **Battle** — pick Rookie, Veteran, or Warlord, then duel. Beating a rival opens the next one. Each fight rolls a small arena: Default, Plains, Fortress, Graveyard, Town, Volcano, or Junkyard. The name shows at the start. Cover stops shots and tanks. Lava on Volcano burns the core of a tank that drives through it. A rematch keeps the same field. Each bot uses the same drive commands a remote player would send later, paths around cover, and fires only with a clear shot.
+- **Battle** — pick Rookie, Veteran, or Warlord, then duel. Beating a rival opens the next one. Each fight rolls an arena: Default, Plains, Fortress, Graveyard, Town, Volcano, or Junkyard. The long side is about eight tank-lengths. The name shows at the start. The camera follows your tank. A minimap and an arrow point at a rival who is off screen. Cover stops shots and tanks. Lava on Volcano burns the core of a tank that drives through it. A rematch keeps the same field. Each bot uses the same drive commands a remote player would send later, paths around cover, and fires only with a clear shot.
 - **Shop** — spend scrap from won duels. Each card shows the name, what the part does, its tradeoff, the price, and a Buy button. Bought blocks join the garage palette. The bought hull joins the switcher.
 
 ## Controls
@@ -48,7 +48,7 @@ Hitting either cell of a medium cannon damages that one gun. It pops off as a si
 
 Rookie fields two cannons and a light hull, and aims loosely. Veteran adds a heavy plate, four cannons, and a repair bay, and starts to strafe and lead. Warlord rides the rear-turret hull with heavy cheeks, a medium cannon, and a repair bay, and leads, dodges, and holds range. Progress is `botsBeaten` in the save: 0 opens only Rookie, and each win unlocks the next name.
 
-Arenas live in `src/maps.ts`. None is longer than four tank-lengths. Spawns sit on opposite sides, clear of cover, with a drivable path between them.
+Arenas live in `src/maps.ts`. The long side is about eight tank-lengths. Spawns sit on opposite sides, clear of cover, with a drivable path between them. The picture is pixel art: a low internal resolution scaled up with nearest-neighbor, and the Press Start 2P font hosted in `public/fonts`.
 
 Saves use `tank-builder-save-v4`, with one layout per hull. An older long-hull save keeps its scrap, unlocks, and 5×7 layout on the standard hull. A wide or 5×3 save keeps scrap and unlocks and gets a fresh standard hull. A save that has no rival progress starts at Rookie.
 

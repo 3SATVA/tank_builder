@@ -1,9 +1,12 @@
 import { clamp } from "./math";
+import { PAL } from "./palette";
 
-/** A tank is 7 blocks long. Arenas stay inside four of those. */
+/** A tank is 7 blocks long. Arenas stay inside eight of those. */
 export const TANK_LENGTH = 7 * 24;
-export const MAX_ARENA = TANK_LENGTH * 4;
+export const MAX_ARENA = TANK_LENGTH * 8;
 export const TILE = 32;
+/** Each authored tile is repeated this many times on both axes. */
+const LAYOUT_SCALE = 2;
 
 const NAV_R = 58;
 const STEP = 16;
@@ -54,15 +57,16 @@ interface MapSpec {
  * `B` is the rival (top). Every other glyph is a themed block. Lava is a hazard:
  * it hurts a tank and bots will not path through it, but shots fly over it.
  * Side lanes stay open so a tank-sized circle can always drive spawn to spawn.
+ * Each glyph is scaled up so cover grows with the arena.
  */
 const SPECS: readonly MapSpec[] = [
   {
     id: "default",
     name: "Default",
-    ground: "#1b2333",
-    alt: "#222a3a",
-    edge: "#465064",
-    kinds: { "#": { color: "#2c3546" }, P: { color: "#3a4458" } },
+    ground: PAL.navy,
+    alt: PAL.blueDark,
+    edge: PAL.steel,
+    kinds: { "#": { color: PAL.panel }, P: { color: PAL.steel } },
     rows: [
       "....................",
       "....................",
@@ -85,13 +89,13 @@ const SPECS: readonly MapSpec[] = [
   {
     id: "plains",
     name: "Plains",
-    ground: "#3d6b3a",
-    alt: "#4e7d45",
-    edge: "#2a4a28",
+    ground: PAL.grass,
+    alt: PAL.grassLite,
+    edge: PAL.greenDark,
     kinds: {
-      H: { color: "#c4a15a" },
-      R: { color: "#7d848c" },
-      W: { color: "#6d5a3a" },
+      H: { color: PAL.hay },
+      R: { color: PAL.gray },
+      W: { color: PAL.brown },
     },
     rows: [
       "....................",
@@ -115,10 +119,10 @@ const SPECS: readonly MapSpec[] = [
   {
     id: "fortress",
     name: "Fortress",
-    ground: "#4a463f",
-    alt: "#5c574e",
-    edge: "#2e2b27",
-    kinds: { "#": { color: "#8a8478" }, K: { color: "#5c574e" } },
+    ground: PAL.stone,
+    alt: PAL.stoneDark,
+    edge: PAL.shadow,
+    kinds: { "#": { color: PAL.stone }, K: { color: PAL.grayDark } },
     rows: [
       "....................",
       "....................",
@@ -141,14 +145,14 @@ const SPECS: readonly MapSpec[] = [
   {
     id: "graveyard",
     name: "Graveyard",
-    ground: "#2c3328",
-    alt: "#343c2f",
-    edge: "#1a1e18",
+    ground: PAL.greenDark,
+    alt: PAL.grass,
+    edge: PAL.shadow,
     kinds: {
-      T: { color: "#cfc6b8" },
-      C: { color: "#4a4038" },
-      Y: { color: "#3a2a22" },
-      F: { color: "#6a7078" },
+      T: { color: PAL.tan },
+      C: { color: PAL.brownDark },
+      Y: { color: PAL.brown },
+      F: { color: PAL.mist },
     },
     rows: [
       "....................",
@@ -172,13 +176,13 @@ const SPECS: readonly MapSpec[] = [
   {
     id: "town",
     name: "Town",
-    ground: "#6b6458",
-    alt: "#8a8172",
-    edge: "#3e3a34",
+    ground: PAL.brown,
+    alt: PAL.sand,
+    edge: PAL.brownDark,
     kinds: {
-      U: { color: "#a3543c" },
-      N: { color: "#c4b49a" },
-      X: { color: "#c9843a" },
+      U: { color: PAL.house },
+      N: { color: PAL.houseLite },
+      X: { color: PAL.crate },
     },
     rows: [
       "....................",
@@ -202,13 +206,13 @@ const SPECS: readonly MapSpec[] = [
   {
     id: "volcano",
     name: "Volcano",
-    ground: "#2a2422",
-    alt: "#3a3330",
-    edge: "#140f0d",
+    ground: PAL.ink,
+    alt: PAL.grayDark,
+    edge: PAL.shadow,
     kinds: {
-      P: { color: "#1a1614" },
-      R: { color: "#4a403c" },
-      L: { color: "#e85d04", hazard: true },
+      P: { color: PAL.void },
+      R: { color: PAL.stoneDark },
+      L: { color: PAL.lava, hazard: true },
     },
     rows: [
       "....................",
@@ -232,14 +236,14 @@ const SPECS: readonly MapSpec[] = [
   {
     id: "junkyard",
     name: "Junkyard",
-    ground: "#5c5346",
-    alt: "#6a604f",
-    edge: "#2a261f",
+    ground: PAL.stoneDark,
+    alt: PAL.brownDark,
+    edge: PAL.shadow,
     kinds: {
-      S: { color: "#8a6a3a" },
-      V: { color: "#8f2d2d" },
-      D: { color: "#3d5a80" },
-      I: { color: "#1c1c1c" },
+      S: { color: PAL.scrap },
+      V: { color: PAL.car },
+      D: { color: PAL.carBlue },
+      I: { color: PAL.tire },
     },
     rows: [
       "....................",
@@ -291,27 +295,49 @@ function buildNav(map: Pick<ArenaMap, "w" | "h" | "blocks" | "hazards">): Pick<A
   return { nav, navCols, navRows };
 }
 
+function scaleLayout(rows: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const row of rows) {
+    let wide = "";
+    for (const glyph of row) wide += glyph.repeat(LAYOUT_SCALE);
+    for (let copy = 0; copy < LAYOUT_SCALE; copy += 1) out.push(wide);
+  }
+  return out;
+}
+
+function centroid(points: { x: number; y: number }[]): { x: number; y: number } | null {
+  if (points.length === 0) return null;
+  const sum = points.reduce((acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }), { x: 0, y: 0 });
+  return { x: sum.x / points.length, y: sum.y / points.length };
+}
+
 function buildMap(spec: MapSpec): ArenaMap {
-  const width = spec.rows[0]?.length ?? 0;
-  if (width === 0 || spec.rows.some((row) => row.length !== width)) {
+  const rows = scaleLayout(spec.rows);
+  const width = rows[0]?.length ?? 0;
+  const pad = ".".repeat(width);
+  for (let extra = 0; extra < 4; extra += 1) {
+    rows.unshift(pad);
+    rows.push(pad);
+  }
+  if (width === 0 || rows.some((row) => row.length !== width)) {
     throw new Error(`${spec.id} rows must be the same width`);
   }
   const blocks: MapBlock[] = [];
   const hazards: MapBlock[] = [];
-  let spawnA: { x: number; y: number } | null = null;
-  let spawnB: { x: number; y: number } | null = null;
-  spec.rows.forEach((row, r) => {
+  const marksA: { x: number; y: number }[] = [];
+  const marksB: { x: number; y: number }[] = [];
+  rows.forEach((row, r) => {
     for (let c = 0; c < row.length; c += 1) {
       const glyph = row[c] ?? ".";
       if (glyph === ".") continue;
       const x = c * TILE + TILE / 2;
       const y = r * TILE + TILE / 2;
       if (glyph === "A") {
-        spawnA = { x, y };
+        marksA.push({ x, y });
         continue;
       }
       if (glyph === "B") {
-        spawnB = { x, y };
+        marksB.push({ x, y });
         continue;
       }
       const style = spec.kinds[glyph];
@@ -321,9 +347,11 @@ function buildMap(spec: MapSpec): ArenaMap {
       else blocks.push(block);
     }
   });
+  const spawnA = centroid(marksA);
+  const spawnB = centroid(marksB);
   if (!spawnA || !spawnB) throw new Error(`${spec.id} needs spawn A and spawn B`);
   const w = width * TILE;
-  const h = spec.rows.length * TILE;
+  const h = rows.length * TILE;
   const draft = { w, h, blocks, hazards };
   return {
     id: spec.id,
@@ -415,7 +443,7 @@ export function steerPoint(map: ArenaMap, x: number, y: number, gx: number, gy: 
   if (!start || !goal) return null;
   const path = bfs(map, start, goal);
   if (!path) return null;
-  const node = path[Math.min(path.length - 1, 3)] ?? path[0];
+  const node = path[Math.min(path.length - 1, 6)] ?? path[0];
   if (!node) return null;
   return { x: node.gx * STEP + STEP / 2, y: node.gy * STEP + STEP / 2 };
 }

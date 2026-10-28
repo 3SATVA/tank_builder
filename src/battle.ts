@@ -3,8 +3,9 @@ import { el } from "./dom";
 import { CELL, cellCenter, listGuns } from "./geometry";
 import { applyRepair, damageInstance, nextRepair } from "./grid";
 import { attachInput, type InputController } from "./input";
-import { clamp, localToWorld, rotateToward, traceRoundRect, worldToLocal } from "./math";
+import { clamp, localToWorld, rotateToward, worldToLocal } from "./math";
 import { hitsBlock, hitsHazard, pickMap, resolveTank, TILE, type ArenaMap, type MapBlock } from "./maps";
+import { PAL } from "./palette";
 import {
   blockPlate,
   cloneGrid,
@@ -23,6 +24,29 @@ import type { ModuleKind } from "./types";
 
 const TURRET_TURN = 4.6;
 const LAVA_DPS = 18;
+/** World units per internal art pixel. Even sizes (cell 24, tile 32) land on the grid. */
+const WORLD_PER_ART = 2;
+const PIXEL_CSS = 2;
+
+interface Sprite {
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+}
+
+function makeSprite(): Sprite {
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas unavailable");
+  return { canvas, ctx };
+}
+
+const hullSprite = makeSprite();
+const turretSprite = makeSprite();
+const shotSprite = makeSprite();
+
+function quant(value: number): number {
+  return Math.round(value / WORLD_PER_ART) * WORLD_PER_ART;
+}
 
 type Side = "player" | "rival";
 
@@ -200,6 +224,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas unavailable");
   const context = ctx;
+  let pen: CanvasRenderingContext2D = context;
   const input = attachInput(moveStick.base, moveStick.knob, aimStick.base, aimStick.knob);
   const rivalAi = createBotController(options.rivalTuning);
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -216,6 +241,8 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   let acc = 0;
   let player = spawnTank("player", "You", playerBlueprint, map.spawnA.x, map.spawnA.y, 0, options.hull);
   let rival = spawnTank("rival", options.rivalName, options.rivalGrid, map.spawnB.x, map.spawnB.y, Math.PI, options.rivalHull);
+  let camX = 0;
+  let camY = 0;
   let shots: Shot[] = [];
   let particles: Particle[] = [];
   let floaters: Floater[] = [];
@@ -245,6 +272,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     endcard.hidden = true;
     showMapTitle();
     syncHud();
+    easeCamera(1);
   }
 
   function update(dt: number): void {
@@ -360,7 +388,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
         damage: gun.damage,
         life: gun.life,
         owner: tank.id,
-        color: gun.heavy ? (tank.id === "player" ? "#b8fff4" : "#ffd0c4") : tank.id === "player" ? "#8ef6ea" : "#ffb0a0",
+        color: gun.heavy ? (tank.id === "player" ? PAL.cyan : PAL.cream) : tank.id === "player" ? PAL.teal : PAL.orange,
       });
     }
     if (tank.id === "player") {
@@ -442,155 +470,197 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
 
   function draw(): void {
     const view = currentView();
+    const jx = shake > 0 && !reduceMotion ? quant((Math.random() - 0.5) * shake * 2) : 0;
+    const jy = shake > 0 && !reduceMotion ? quant((Math.random() - 0.5) * shake * 2) : 0;
+    context.imageSmoothingEnabled = false;
     context.setTransform(1, 0, 0, 1, 0, 0);
-    context.clearRect(0, 0, canvas.width, canvas.height);
-    const jx = shake > 0 && !reduceMotion ? (Math.random() - 0.5) * shake : 0;
-    const jy = shake > 0 && !reduceMotion ? (Math.random() - 0.5) * shake : 0;
-    context.setTransform(
-      view.dpr * view.zoom,
-      0,
-      0,
-      view.dpr * view.zoom,
-      (-view.camX + jx) * view.dpr * view.zoom,
-      (-view.camY + jy) * view.dpr * view.zoom,
-    );
+    context.fillStyle = PAL.void;
+    context.fillRect(0, 0, view.artW, view.artH);
+    const scale = 1 / WORLD_PER_ART;
+    context.setTransform(scale, 0, 0, scale, (-view.camX + jx) * scale, (-view.camY + jy) * scale);
+    pen = context;
     drawArena();
-    drawTank(rival, "#5a2430");
-    drawTank(player, "#2a3142");
+    drawTank(rival, PAL.redDark);
+    drawTank(player, PAL.navy);
     for (const shot of shots) {
-      context.save();
-      context.translate(shot.x, shot.y);
-      context.rotate(Math.atan2(shot.vy, shot.vx));
-      context.fillStyle = shot.color;
-      traceRoundRect(context, -12, -3, 16, 6, 3);
-      context.fill();
-      context.restore();
+      paintSprite(shotSprite, 18, 8, 0, 0, () => {
+        box(-8, -2, 12, 4, shot.color);
+        box(2, -2, 4, 4, PAL.white);
+      });
+      blit(shotSprite, shot.x, shot.y, Math.atan2(shot.vy, shot.vx), 18, 8);
     }
     for (const bit of particles) {
-      context.globalAlpha = Math.max(0, bit.life / bit.max);
-      context.fillStyle = bit.color;
-      if (bit.puff) {
-        context.beginPath();
-        context.arc(bit.x, bit.y, bit.size, 0, Math.PI * 2);
-        context.fill();
-      } else {
-        context.fillRect(bit.x, bit.y, bit.size, bit.size);
-      }
-      context.globalAlpha = 1;
+      const step = bit.life > bit.max * 0.6 ? 6 : bit.life > bit.max * 0.3 ? 4 : 2;
+      box(bit.x, bit.y, step, step, bit.color);
     }
-    context.font = "700 16px Trebuchet MS, Verdana, sans-serif";
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.font = "8px 'Press Start 2P', monospace";
     context.textAlign = "center";
+    context.textBaseline = "middle";
     for (const floater of floaters) {
-      context.globalAlpha = Math.max(0, floater.life);
-      context.fillStyle = "#f6f1e6";
-      context.fillText(floater.text, floater.x, floater.y);
-      context.globalAlpha = 1;
+      if (floater.life < 0.25) continue;
+      artText(floater.text, floater.x, floater.y, PAL.paper);
     }
+    drawMinimap(view);
+    drawArrow(view);
+  }
+
+  function artText(text: string, worldX: number, worldY: number, color: string): void {
+    const ax = Math.round((worldX - camX) / WORLD_PER_ART);
+    const ay = Math.round((worldY - camY) / WORLD_PER_ART);
+    context.fillStyle = PAL.shadow;
+    context.fillText(text, ax + 1, ay + 1);
+    context.fillStyle = color;
+    context.fillText(text, ax, ay);
+  }
+
+  function drawMinimap(view: Frame): void {
+    const cols = Math.round(map.w / TILE);
+    const rows = Math.round(map.h / TILE);
+    const ox = view.artW - cols - 6;
+    const oy = Math.max(6, Math.round(view.artH * 0.38));
+    context.fillStyle = PAL.shadow;
+    context.fillRect(ox - 2, oy - 2, cols + 4, rows + 4);
+    context.fillStyle = PAL.paper;
+    context.fillRect(ox - 2, oy - 2, cols + 4, 1);
+    context.fillRect(ox - 2, oy - 2, 1, rows + 4);
+    context.fillStyle = map.ground;
+    context.fillRect(ox, oy, cols, rows);
+    for (const block of map.blocks) {
+      context.fillStyle = block.color;
+      context.fillRect(ox + block.x / TILE, oy + block.y / TILE, Math.max(1, block.w / TILE), Math.max(1, block.h / TILE));
+    }
+    for (const pool of map.hazards) {
+      context.fillStyle = PAL.lava;
+      context.fillRect(ox + pool.x / TILE, oy + pool.y / TILE, Math.max(1, pool.w / TILE), Math.max(1, pool.h / TILE));
+    }
+    const mark = (x: number, y: number, color: string): void => {
+      context.fillStyle = color;
+      context.fillRect(ox + Math.floor(x / TILE), oy + Math.floor(y / TILE), 2, 2);
+    };
+    mark(rival.x, rival.y, PAL.red);
+    mark(player.x, player.y, PAL.cyan);
+    const vx = ox + camX / TILE;
+    const vy = oy + camY / TILE;
+    const vw = Math.max(4, view.viewW / TILE);
+    const vh = Math.max(4, view.viewH / TILE);
+    context.fillStyle = PAL.paper;
+    const tick = 3;
+    context.fillRect(vx, vy, tick, 1);
+    context.fillRect(vx, vy, 1, tick);
+    context.fillRect(vx + vw - tick, vy, tick, 1);
+    context.fillRect(vx + vw - 1, vy, 1, tick);
+    context.fillRect(vx, vy + vh - 1, tick, 1);
+    context.fillRect(vx, vy + vh - tick, 1, tick);
+    context.fillRect(vx + vw - tick, vy + vh - 1, tick, 1);
+    context.fillRect(vx + vw - 1, vy + vh - tick, 1, tick);
+  }
+
+  function drawArrow(view: Frame): void {
+    const ax = (rival.x - camX) / WORLD_PER_ART;
+    const ay = (rival.y - camY) / WORLD_PER_ART;
+    const left = 16;
+    const right = view.artW - 16;
+    const top = Math.round(view.artH * 0.36);
+    const bottom = Math.round(view.artH * 0.72);
+    if (ax > left && ax < right && ay > top && ay < bottom) return;
+    const cx = (left + right) / 2;
+    const cy = (top + bottom) / 2;
+    const dx = ax - cx;
+    const dy = ay - cy;
+    const dist = Math.hypot(dx, dy) || 1;
+    const hw = (right - left) / 2;
+    const hh = (bottom - top) / 2;
+    const reach = Math.min(hw / Math.max(1e-4, Math.abs(dx) / dist), hh / Math.max(1e-4, Math.abs(dy) / dist));
+    const px = Math.round(cx + (dx / dist) * reach);
+    const py = Math.round(cy + (dy / dist) * reach);
+    context.fillStyle = PAL.shadow;
+    context.fillRect(px - 6, py - 6, 12, 12);
+    context.fillStyle = PAL.red;
+    context.fillRect(px - 5, py - 5, 10, 10);
+    context.fillStyle = PAL.gold;
+    const ux = Math.round((dx / dist) * 3);
+    const uy = Math.round((dy / dist) * 3);
+    context.fillRect(px - 2 + ux, py - 2 + uy, 4, 4);
   }
 
   function drawArena(): void {
-    context.fillStyle = "#10141c";
-    context.fillRect(-900, -900, map.w + 1800, map.h + 1800);
+    box(-TILE * 4, -TILE * 4, map.w + TILE * 8, map.h + TILE * 8, PAL.void);
     const cols = Math.round(map.w / TILE);
     const rows = Math.round(map.h / TILE);
     for (let r = 0; r < rows; r += 1) {
       for (let c = 0; c < cols; c += 1) {
-        context.fillStyle = (c + r) % 2 === 0 ? map.ground : map.alt;
-        context.fillRect(c * TILE, r * TILE, TILE, TILE);
+        box(c * TILE, r * TILE, TILE, TILE, (c + r) % 2 === 0 ? map.ground : map.alt);
         const n = (Math.imul(c + r * 17 + map.w, 1103515245) + 12345) >>> 16;
-        if ((n & 3) === 0) {
-          context.fillStyle = "rgba(0,0,0,0.16)";
-          context.fillRect(c * TILE + (n & 15), r * TILE + ((n >> 4) & 15), 7, 7);
-        }
+        if ((n & 7) === 0) box(c * TILE + (n & 14), r * TILE + ((n >> 4) & 14), 2, 2, PAL.shadow);
       }
     }
     for (const pool of map.hazards) drawLava(pool);
     for (const block of map.blocks) drawCover(block);
-    context.strokeStyle = map.edge;
-    context.lineWidth = 10;
-    context.strokeRect(5, 5, map.w - 10, map.h - 10);
+    edge(0, 0, map.w, map.h, 4, map.edge);
   }
 
   function drawCover(block: MapBlock): void {
     const { x, y, w, h, kind, color } = block;
-    context.fillStyle = color;
-    context.fillRect(x, y, w, h);
-    context.strokeStyle = "#0e1116";
-    context.lineWidth = 3;
-    context.strokeRect(x + 1.5, y + 1.5, w - 3, h - 3);
+    box(x, y, w, h, color);
+    edge(x, y, w, h, 2, PAL.shadow);
+    box(x + 2, y + 2, w - 4, 2, PAL.paper);
     if (kind === "H") {
-      context.fillStyle = "#8a6a32";
-      context.fillRect(x + 4, y + 8, w - 8, 5);
-      context.fillRect(x + 4, y + 18, w - 8, 5);
+      box(x + 4, y + 8, w - 8, 4, PAL.hayDark);
+      box(x + 4, y + 18, w - 8, 4, PAL.hayDark);
     } else if (kind === "R" || kind === "P" || kind === "#") {
-      context.fillStyle = "rgba(0,0,0,0.28)";
-      context.fillRect(x + 6, y + 6, 10, 10);
-      context.fillRect(x + w - 14, y + h - 14, 8, 8);
+      box(x + 6, y + 6, 6, 6, PAL.shadow);
+      box(x + w - 12, y + h - 12, 6, 6, PAL.gray);
     } else if (kind === "K") {
-      context.fillStyle = "#8a8478";
-      context.fillRect(x + 3, y + 3, 6, 6);
-      context.fillRect(x + w / 2 - 3, y + 3, 6, 6);
-      context.fillRect(x + w - 9, y + 3, 6, 6);
+      box(x + 4, y + 4, 6, 6, PAL.stone);
+      box(x + w / 2 - 3, y + 4, 6, 6, PAL.stone);
+      box(x + w - 10, y + 4, 6, 6, PAL.stone);
     } else if (kind === "T") {
-      context.fillStyle = "#4a4038";
-      context.fillRect(x + w / 2 - 2, y + 6, 4, h - 14);
-      context.fillRect(x + 8, y + 10, w - 16, 4);
+      box(x + w / 2 - 2, y + 6, 4, h - 12, PAL.brownDark);
+      box(x + 8, y + 10, w - 16, 4, PAL.brownDark);
     } else if (kind === "C") {
-      context.fillStyle = "#1a1614";
-      context.fillRect(x + 10, y + 12, w - 20, h - 16);
-      context.fillStyle = "#cfc6b8";
-      context.fillRect(x + 4, y + 4, w - 8, 5);
+      box(x + 8, y + 12, w - 16, h - 16, PAL.shadow);
+      box(x + 4, y + 4, w - 8, 4, PAL.tan);
     } else if (kind === "Y") {
-      context.fillStyle = "#241810";
-      context.fillRect(x + w / 2 - 3, y + 6, 6, h - 8);
-      context.fillRect(x + 6, y + 8, w - 12, 5);
-      context.fillRect(x + 8, y + 16, w - 16, 4);
+      box(x + w / 2 - 2, y + 8, 4, h - 10, PAL.brownDark);
+      box(x + 6, y + 6, w - 12, 4, PAL.brownDark);
+      box(x + 8, y + 14, w - 16, 4, PAL.ink);
     } else if (kind === "F") {
-      context.fillStyle = "#c5ccd4";
-      context.fillRect(x + 5, y + 4, 3, h - 8);
-      context.fillRect(x + w / 2 - 1, y + 4, 3, h - 8);
-      context.fillRect(x + w - 8, y + 4, 3, h - 8);
-      context.fillRect(x + 4, y + 8, w - 8, 3);
+      box(x + 4, y + 4, 2, h - 8, PAL.paper);
+      box(x + w / 2 - 1, y + 4, 2, h - 8, PAL.paper);
+      box(x + w - 6, y + 4, 2, h - 8, PAL.paper);
+      box(x + 4, y + 8, w - 8, 2, PAL.paper);
     } else if (kind === "U" || kind === "N") {
-      context.fillStyle = kind === "U" ? "#6e2f22" : "#8d7d62";
-      context.fillRect(x, y, w, 9);
-      context.fillStyle = "#f6f1e6";
-      context.fillRect(x + 6, y + 14, 7, 7);
-      context.fillRect(x + w - 13, y + 14, 7, 7);
+      box(x, y, w, 8, kind === "U" ? PAL.redDark : PAL.sand);
+      box(x + 6, y + 14, 6, 6, PAL.gold);
+      box(x + w - 12, y + 14, 6, 6, PAL.gold);
     } else if (kind === "X") {
-      context.fillStyle = "#8a5a22";
-      context.fillRect(x + 4, y + w / 2 - 2, w - 8, 4);
-      context.fillRect(x + w / 2 - 2, y + 4, 4, h - 8);
+      box(x + 4, y + h / 2 - 2, w - 8, 4, PAL.brownDark);
+      box(x + w / 2 - 2, y + 4, 4, h - 8, PAL.brownDark);
     } else if (kind === "S") {
-      context.fillStyle = "#c4a15a";
-      context.fillRect(x + 4, y + 6, 12, 8);
-      context.fillStyle = "#4a4038";
-      context.fillRect(x + 14, y + 14, 12, 10);
+      box(x + 4, y + 6, 10, 6, PAL.sand);
+      box(x + 14, y + 14, 10, 8, PAL.brownDark);
     } else if (kind === "V" || kind === "D") {
-      context.fillStyle = "#141820";
-      context.fillRect(x + 3, y + h - 10, 8, 7);
-      context.fillRect(x + w - 11, y + h - 10, 8, 7);
-      context.fillStyle = "#d7e2ea";
-      context.fillRect(x + 7, y + 6, w - 14, 8);
+      box(x + 2, y + h - 10, 8, 6, PAL.tire);
+      box(x + w - 10, y + h - 10, 8, 6, PAL.tire);
+      box(x + 6, y + 6, w - 12, 6, PAL.cyan);
     } else if (kind === "I") {
-      context.fillStyle = "#2a2a2a";
-      context.fillRect(x + 5, y + 4, w - 10, 7);
-      context.fillRect(x + 5, y + 13, w - 10, 7);
-      context.fillRect(x + 5, y + 22, w - 10, 6);
-      context.fillStyle = "#5c5346";
-      context.fillRect(x + 12, y + 5, 8, 5);
-      context.fillRect(x + 12, y + 14, 8, 5);
+      box(x + 4, y + 4, w - 8, 6, PAL.grayDark);
+      box(x + 4, y + 12, w - 8, 6, PAL.grayDark);
+      box(x + 4, y + 20, w - 8, 6, PAL.grayDark);
+      box(x + 12, y + 6, 8, 2, PAL.stoneDark);
+      box(x + 12, y + 14, 8, 2, PAL.stoneDark);
     }
   }
 
   function drawLava(block: MapBlock): void {
-    context.fillStyle = block.color;
-    context.fillRect(block.x, block.y, block.w, block.h);
-    const flicker = reduceMotion ? 0 : Math.sin(simTime * 5 + block.x * 0.08) * 2;
-    context.fillStyle = "#ffba08";
-    context.fillRect(block.x + 7, block.y + 7 + flicker * 0.15, block.w - 14, block.h - 14);
-    context.fillStyle = "#fff3bf";
-    context.fillRect(block.x + 13, block.y + 13, 6, 6);
+    box(block.x, block.y, block.w, block.h, PAL.lava);
+    box(block.x + 4, block.y + 4, block.w - 8, block.h - 8, PAL.orange);
+    const tick = reduceMotion ? 0 : Math.floor(simTime * 5 + block.x / TILE);
+    const bob = (tick % 4) * 4;
+    box(block.x + 6 + bob, block.y + 8, 4, 4, PAL.gold);
+    box(block.x + 18 - bob, block.y + 18, 4, 4, PAL.cream);
+    box(block.x + 10, block.y + 6 + (tick % 3) * 4, 4, 4, PAL.gold);
   }
 
   function drawTank(tank: Tank, chassis: string): void {
@@ -598,59 +668,61 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     const rows = tank.grid.length;
     const bodyW = cols * CELL;
     const bodyH = rows * CELL;
-    context.save();
-    context.translate(tank.x + 4, tank.y + 6);
-    context.rotate(tank.angle);
-    context.fillStyle = "rgba(0,0,0,0.28)";
-    context.beginPath();
-    context.ellipse(0, 0, bodyW * 0.42, bodyH * 0.42, 0, 0, Math.PI * 2);
-    context.fill();
-    context.restore();
-
-    context.save();
-    context.globalAlpha = tank.flash > 0 ? 0.72 : 1;
-    context.translate(tank.x, tank.y);
-    context.rotate(tank.angle);
-    traceRoundRect(context, -bodyW / 2 - 4, -bodyH / 2 - 4, bodyW + 8, bodyH + 8, 12);
-    context.fillStyle = chassis;
-    context.fill();
-    context.strokeStyle = "#0e1116";
-    context.lineWidth = 4;
-    context.stroke();
-    context.fillStyle = "#ffb703";
-    context.beginPath();
-    context.moveTo(0, -bodyH / 2 - 12);
-    context.lineTo(10, -bodyH / 2 + 2);
-    context.lineTo(-10, -bodyH / 2 + 2);
-    context.closePath();
-    context.fill();
-    drawCells(tank, false);
-    context.restore();
+    const span = Math.max(bodyW, bodyH) + CELL * 4;
+    box(tank.x - bodyW * 0.28 + 4, tank.y - bodyH * 0.18 + 6, bodyW * 0.56, bodyH * 0.4, PAL.shadow);
+    paintSprite(hullSprite, span, span, 0, 0, () => {
+      box(-bodyW / 2 - 4, -bodyH / 2 - 4, bodyW + 8, bodyH + 8, chassis);
+      edge(-bodyW / 2 - 4, -bodyH / 2 - 4, bodyW + 8, bodyH + 8, 2, PAL.shadow);
+      drawNose(bodyH);
+      drawCells(tank, false);
+      if (tank.flash > 0) dither(tank, false);
+    });
+    blit(hullSprite, tank.x, tank.y, tank.angle, span, span);
 
     const pivot = turretPivot(cols, rows, tank.hull);
     const pivoted = localToWorld(pivot.x, pivot.y, tank.angle);
-    context.save();
-    context.translate(tank.x + pivoted.x, tank.y + pivoted.y);
-    context.rotate(tank.turret);
-    context.translate(-pivot.x, -pivot.y);
-    drawCells(tank, true);
-    const origin = turretOrigin(tank.hull);
-    const top = cellCenter(origin.c, origin.r, cols, rows);
-    context.strokeStyle = "#ffb703";
-    context.lineWidth = 3;
-    traceRoundRect(context, top.x - CELL / 2 - 2, top.y - CELL / 2 - 2, TURRET_SIZE * CELL + 4, TURRET_SIZE * CELL + 4, 8);
-    context.stroke();
-    context.restore();
+    paintSprite(turretSprite, span, span, pivot.x, pivot.y, () => {
+      drawCells(tank, true);
+      const origin = turretOrigin(tank.hull);
+      const top = cellCenter(origin.c, origin.r, cols, rows);
+      edge(top.x - CELL / 2, top.y - CELL / 2, TURRET_SIZE * CELL, TURRET_SIZE * CELL, 2, PAL.amber);
+      if (tank.flash > 0) dither(tank, true);
+    });
+    blit(turretSprite, tank.x + pivoted.x, tank.y + pivoted.y, tank.turret, span, span);
 
-    context.fillStyle = "#f6f1e6";
-    context.font = "700 14px Trebuchet MS, Verdana, sans-serif";
+    context.save();
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.font = "8px 'Press Start 2P', monospace";
     context.textAlign = "center";
-    context.fillText(tank.name, tank.x, tank.y - bodyH * 0.62);
-    const barW = 54;
-    context.fillStyle = "#0e1116";
-    context.fillRect(tank.x - barW / 2, tank.y - bodyH * 0.62 + 6, barW, 5);
-    context.fillStyle = tank.id === "player" ? "#7dcf6a" : "#ff5d5d";
-    context.fillRect(tank.x - barW / 2, tank.y - bodyH * 0.62 + 6, barW * clamp(tank.core / tank.coreMax, 0, 1), 5);
+    context.textBaseline = "bottom";
+    artText(tank.name, tank.x, tank.y - bodyH * 0.62, PAL.paper);
+    const ax = Math.round((tank.x - camX) / WORLD_PER_ART);
+    const ay = Math.round((tank.y - bodyH * 0.62 - camY) / WORLD_PER_ART) + 4;
+    context.fillStyle = PAL.shadow;
+    context.fillRect(ax - 14, ay, 28, 3);
+    context.fillStyle = tank.id === "player" ? PAL.green : PAL.red;
+    context.fillRect(ax - 14, ay, Math.round(28 * clamp(tank.core / tank.coreMax, 0, 1)), 3);
+    context.restore();
+  }
+
+  function dither(tank: Tank, turretLayer: boolean): void {
+    const cols = tank.grid[0]?.length ?? 1;
+    const rows = tank.grid.length;
+    for (let r = 0; r < rows; r += 1) {
+      for (let c = 0; c < cols; c += 1) {
+        if (isTurretCell(r, c, cols, rows, tank.hull) !== turretLayer) continue;
+        const center = cellCenter(c, r, cols, rows);
+        box(center.x - 4, center.y - 4, 2, 2, PAL.white);
+        box(center.x + 2, center.y + 2, 2, 2, PAL.white);
+      }
+    }
+  }
+
+  function drawNose(bodyH: number): void {
+    const top = -bodyH / 2 - 10;
+    box(-2, top, 4, 2, PAL.amber);
+    box(-4, top + 2, 8, 2, PAL.amber);
+    box(-6, top + 4, 12, 2, PAL.gold);
   }
 
   function drawCells(tank: Tank, turretLayer: boolean): void {
@@ -662,236 +734,204 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
         if (turret !== turretLayer) continue;
         const id = tank.grid[r][c];
         const center = cellCenter(c, r, cols, rows);
-        const size = CELL - 3;
+        const size = CELL - 2;
         const x = center.x - size / 2;
         const y = center.y - size / 2;
         const mod = cellModule(id);
-        context.beginPath();
-        context.rect(x, y, size, size);
-        context.fillStyle = mod?.color ?? "#141820";
-        context.fill();
-        context.lineWidth = mod?.id === "heavy-armor" ? 3.5 : 2;
-        context.strokeStyle = mod?.id === "heavy-armor" ? "#1a222c" : "#0e1116";
-        context.stroke();
-        if (isCoreCell(r, c, cols, rows, tank.hull)) {
-          context.fillStyle = "#ff5d5d";
-          context.beginPath();
-          context.arc(x + size - 5, y + size - 5, 2.4, 0, Math.PI * 2);
-          context.fill();
-        }
+        box(x, y, size, size, mod?.color ?? PAL.void);
+        edge(x, y, size, size, 2, PAL.shadow);
+        box(x + 2, y + 2, size - 4, 2, PAL.paper);
+        if (isCoreCell(r, c, cols, rows, tank.hull)) box(x + size - 8, y + size - 8, 4, 4, PAL.red);
         if (!id || !mod) continue;
         const moving = Math.hypot(tank.vx, tank.vy) > 18;
         const anchor = isAnchorCell(id, r, c);
         if (mod.kind === "weapon") {
-          if (mod.id === "medium-cannon" && !anchor) drawBreech(center.x, center.y, size);
-          else drawCannon(center.x, center.y, size, tank.muzzle > 0, (mod.rows ?? 1) > 1);
-        } else if (mod.kind === "engine") drawEngine(center.x, center.y, size, moving, simTime + r * 1.7 + c);
-        else {
-          context.fillStyle = "rgba(255,255,255,0.22)";
-          context.fillRect(x + 3, y + 3, size - 6, 4);
-          if (mod.id === "heavy-armor") drawRivets(x, y, size);
-          else if (mod.repairs) drawPlus(center.x, center.y, size * 0.28);
-          else drawGlyph(mod.kind, center.x, center.y, size * 0.26);
-        }
+          if (mod.id === "medium-cannon" && !anchor) drawBreech(x, y, size);
+          else drawCannon(x, y, size, tank.muzzle > 0, (mod.rows ?? 1) > 1);
+        } else if (mod.kind === "engine") drawEngine(x, y, size, moving, r * 3 + c);
+        else if (mod.id === "heavy-armor") drawRivets(x, y, size);
+        else if (mod.repairs) drawPlus(center.x, center.y, 6);
+        else drawGlyph(mod.kind, x, y, size);
         if (tank.sparkLife > 0 && tank.sparkCells.some((cell) => cell.r === r && cell.c === c)) {
-          drawSpark(center.x, center.y, size, tank.sparkLife);
+          drawSpark(center.x, center.y);
         }
         const plateMax = blockPlate(id);
         const left = plateMax > 0 ? tank.plate[r][c] / plateMax : 0;
         if (left < 0.999) {
-          context.fillStyle = "rgba(14,17,22,0.45)";
-          context.fillRect(x + 3, y + size - 6, size - 6, 3);
-          context.fillStyle = "#f6f1e6";
-          context.fillRect(x + 3, y + size - 6, (size - 6) * clamp(left, 0, 1), 3);
+          box(x + 3, y + size - 6, size - 6, 2, PAL.shadow);
+          box(x + 3, y + size - 6, (size - 6) * clamp(left, 0, 1), 2, PAL.paper);
         }
       }
     }
   }
 
-  function drawGlyph(kind: ModuleKind, x: number, y: number, s: number): void {
-    context.save();
-    context.translate(x, y);
-    context.strokeStyle = "rgba(14,17,22,0.55)";
-    context.fillStyle = "rgba(14,17,22,0.55)";
-    context.lineWidth = 2;
-    context.lineCap = "round";
-    context.beginPath();
+  function drawGlyph(kind: ModuleKind, x: number, y: number, size: number): void {
     if (kind === "armor") {
-      context.rect(-s, -s, s * 2, s * 2);
-      context.stroke();
+      edge(x + 6, y + 6, size - 12, size - 12, 2, PAL.navy);
     } else if (kind === "tracks") {
-      context.moveTo(-s, -s * 0.5);
-      context.lineTo(s, -s * 0.5);
-      context.moveTo(-s, 0);
-      context.lineTo(s, 0);
-      context.moveTo(-s, s * 0.5);
-      context.lineTo(s, s * 0.5);
-      context.stroke();
+      box(x + 4, y + 6, size - 8, 2, PAL.shadow);
+      box(x + 4, y + size / 2 - 1, size - 8, 2, PAL.shadow);
+      box(x + 4, y + size - 8, size - 8, 2, PAL.shadow);
     } else if (kind === "power") {
-      context.moveTo(s * 0.15, -s);
-      context.lineTo(-s * 0.45, s * 0.1);
-      context.lineTo(0, s * 0.1);
-      context.lineTo(-s * 0.1, s);
-      context.lineTo(s * 0.55, -s * 0.05);
-      context.closePath();
-      context.fill();
+      box(x + size / 2, y + 4, 4, 6, PAL.brownDark);
+      box(x + size / 2 - 4, y + 8, 8, 4, PAL.brownDark);
+      box(x + size / 2 - 2, y + 12, 4, 6, PAL.brownDark);
     } else if (kind === "fuel") {
-      context.arc(0, 0, s * 0.55, 0, Math.PI * 2);
-      context.fill();
+      box(x + size / 2 - 2, y + 4, 4, 2, PAL.brownDark);
+      box(x + size / 2 - 4, y + 6, 8, 4, PAL.brownDark);
+      box(x + size / 2 - 4, y + 10, 8, 6, PAL.brownDark);
+      box(x + size / 2 - 2, y + 16, 4, 2, PAL.brownDark);
     }
-    context.restore();
   }
 
   function drawCannon(x: number, y: number, size: number, flash: boolean, heavy = false): void {
-    const half = size / 2;
-    const width = size * (heavy ? 0.48 : 0.3);
-    const length = size * (heavy ? 1.9 : 1.05);
-    context.save();
-    context.translate(x, y);
-    context.fillStyle = "#d8fff8";
-    context.strokeStyle = "#0e1116";
-    context.lineWidth = 2;
-    traceRoundRect(context, -width / 2, -half - length * 0.62, width, length, 2);
-    context.fill();
-    context.stroke();
-    context.fillStyle = "#12312e";
-    context.fillRect(-width * 0.22, -half - length * 0.62, width * 0.44, 3);
-    context.fillStyle = "rgba(14,17,22,0.35)";
-    context.fillRect(-half * 0.7, half * 0.15, half * 1.4, half * 0.55);
-    if (flash) {
-      context.fillStyle = "rgba(255, 236, 160, 0.95)";
-      context.beginPath();
-      context.arc(0, -half - length * 0.7, size * 0.32, 0, Math.PI * 2);
-      context.fill();
-      context.fillStyle = "#fff7d6";
-      context.beginPath();
-      context.arc(0, -half - length * 0.7, size * 0.14, 0, Math.PI * 2);
-      context.fill();
-    }
-    context.restore();
+    const width = heavy ? 10 : 6;
+    const length = heavy ? 28 : 16;
+    const bx = x + size / 2 - width / 2;
+    const by = y - length + 6;
+    box(bx, by, width, length, heavy ? PAL.cyan : PAL.white);
+    box(bx, by, width, 2, PAL.shadow);
+    box(x + 4, y + size * 0.45, size - 8, 6, PAL.shadow);
+    if (!flash) return;
+    box(bx - 2, by - 4, width + 4, 4, PAL.gold);
+    box(bx + 2, by - 8, width - 4, 4, PAL.white);
   }
 
   function drawBreech(x: number, y: number, size: number): void {
-    const half = size / 2;
-    context.save();
-    context.translate(x, y);
-    context.fillStyle = "rgba(14,17,22,0.4)";
-    context.strokeStyle = "#0e1116";
-    context.lineWidth = 2;
-    traceRoundRect(context, -half * 0.72, -half * 0.2, half * 1.44, half * 0.9, 2);
-    context.fill();
-    context.stroke();
-    context.restore();
+    box(x + 4, y + size * 0.35, size - 8, size * 0.4, PAL.shadow);
   }
 
   function drawRivets(x: number, y: number, size: number): void {
-    context.fillStyle = "#d5dde6";
-    const inset = 5;
-    for (const [px, py] of [
-      [inset, inset],
-      [size - inset, inset],
-      [inset, size - inset],
-      [size - inset, size - inset],
-    ]) {
-      context.beginPath();
-      context.arc(x + px, y + py, 1.7, 0, Math.PI * 2);
-      context.fill();
-    }
+    box(x + 4, y + 4, 3, 3, PAL.cream);
+    box(x + size - 7, y + 4, 3, 3, PAL.cream);
+    box(x + 4, y + size - 7, 3, 3, PAL.cream);
+    box(x + size - 7, y + size - 7, 3, 3, PAL.cream);
   }
 
   function drawPlus(x: number, y: number, s: number): void {
-    context.save();
-    context.translate(x, y);
-    context.strokeStyle = "rgba(14,17,22,0.7)";
-    context.lineWidth = 2.4;
-    context.lineCap = "round";
-    context.beginPath();
-    context.moveTo(0, -s);
-    context.lineTo(0, s);
-    context.moveTo(-s, 0);
-    context.lineTo(s, 0);
-    context.stroke();
-    context.restore();
+    box(x - 1, y - s, 2, s * 2, PAL.paper);
+    box(x - s, y - 1, s * 2, 2, PAL.paper);
   }
 
-  function drawSpark(x: number, y: number, size: number, life: number): void {
-    context.save();
-    context.globalAlpha = Math.min(1, life * 2.2);
-    context.strokeStyle = "#e7ffc8";
-    context.fillStyle = "#b6f58a";
-    context.lineWidth = 1.5;
-    const s = size * 0.18;
-    for (const [ox, oy] of [
-      [-s, -s],
-      [s, -s * 0.2],
-      [0, s],
-    ]) {
-      context.beginPath();
-      context.moveTo(x + ox - 3, y + oy);
-      context.lineTo(x + ox + 3, y + oy);
-      context.moveTo(x + ox, y + oy - 3);
-      context.lineTo(x + ox, y + oy + 3);
-      context.stroke();
-    }
-    context.restore();
+  function drawSpark(x: number, y: number): void {
+    box(x - 6, y - 1, 4, 2, PAL.gold);
+    box(x + 2, y - 4, 2, 4, PAL.white);
+    box(x - 1, y + 3, 2, 4, PAL.green);
   }
 
   function drawEngine(x: number, y: number, size: number, moving: boolean, phase: number): void {
-    const half = size / 2;
-    context.save();
-    context.translate(x, y);
-    context.fillStyle = "#3a1612";
-    context.strokeStyle = "#0e1116";
-    context.lineWidth = 1.6;
+    const bob = moving && !reduceMotion ? (Math.floor(simTime * 10 + phase) % 2) * 2 : 0;
     for (let i = 0; i < 3; i += 1) {
-      const bob = moving && !reduceMotion ? Math.sin(phase * 22 + i * 1.4) * 1.5 : 0;
-      const px = (i - 1) * size * 0.28;
-      const ph = size * (i === 1 ? 0.34 : 0.42);
-      traceRoundRect(context, px - size * 0.09, -half * 0.15 + bob - ph, size * 0.18, ph, 1.5);
-      context.fill();
-      context.stroke();
+      const px = x + 4 + i * ((size - 8) / 3);
+      const ph = i === 1 ? 8 : 12;
+      box(px, y + 4 + bob, 4, ph, PAL.brownDark);
     }
-    context.strokeStyle = "#1a0c0a";
-    context.lineWidth = 2.4;
-    context.lineCap = "round";
-    context.beginPath();
-    context.moveTo(-size * 0.2, half * 0.15);
-    context.lineTo(-size * 0.2, half + size * 0.28);
-    context.moveTo(size * 0.2, half * 0.35);
-    context.lineTo(size * 0.2, half + size * 0.22);
-    context.stroke();
+    box(x + 6, y + size - 4, 2, 8, PAL.shadow);
+    box(x + size - 8, y + size - 2, 2, 8, PAL.shadow);
+    if (moving) box(x + size / 2 - 2, y + size + 4, 4, 4, (Math.floor(simTime * 8) % 2 === 0 ? PAL.mist : PAL.gray));
+  }
+
+  function box(x: number, y: number, w: number, h: number, color: string): void {
+    pen.fillStyle = color;
+    pen.fillRect(quant(x), quant(y), Math.max(WORLD_PER_ART, quant(w)), Math.max(WORLD_PER_ART, quant(h)));
+  }
+
+  function edge(x: number, y: number, w: number, h: number, t: number, color: string): void {
+    box(x, y, w, t, color);
+    box(x, y + h - t, w, t, color);
+    box(x, y, t, h, color);
+    box(x + w - t, y, t, h, color);
+  }
+
+  function paintSprite(
+    sprite: Sprite,
+    worldW: number,
+    worldH: number,
+    originX: number,
+    originY: number,
+    drawLocal: () => void,
+  ): void {
+    const artW = Math.max(1, Math.ceil(worldW / WORLD_PER_ART));
+    const artH = Math.max(1, Math.ceil(worldH / WORLD_PER_ART));
+    if (sprite.canvas.width !== artW || sprite.canvas.height !== artH) {
+      sprite.canvas.width = artW;
+      sprite.canvas.height = artH;
+    }
+    const ctx = sprite.ctx;
+    ctx.imageSmoothingEnabled = false;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, artW, artH);
+    ctx.setTransform(
+      1 / WORLD_PER_ART,
+      0,
+      0,
+      1 / WORLD_PER_ART,
+      artW / 2 - originX / WORLD_PER_ART,
+      artH / 2 - originY / WORLD_PER_ART,
+    );
+    pen = ctx;
+    drawLocal();
+    pen = context;
+  }
+
+  function blit(sprite: Sprite, x: number, y: number, angle: number, worldW: number, worldH: number): void {
+    context.imageSmoothingEnabled = false;
+    context.save();
+    context.translate(quant(x), quant(y));
+    context.rotate(angle);
+    context.drawImage(sprite.canvas, -worldW / 2, -worldH / 2, worldW, worldH);
     context.restore();
   }
 
-  function currentView(): { zoom: number; camX: number; camY: number; dpr: number; rect: DOMRect } {
+  interface Frame {
+    artW: number;
+    artH: number;
+    viewW: number;
+    viewH: number;
+    camX: number;
+    camY: number;
+    rect: DOMRect;
+  }
+
+  function measure(): Frame {
     const rect = canvas.getBoundingClientRect();
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const width = Math.max(1, Math.round(rect.width * dpr));
-    const height = Math.max(1, Math.round(rect.height * dpr));
-    if (canvas.width !== width || canvas.height !== height) {
-      canvas.width = width;
-      canvas.height = height;
+    const artW = Math.max(1, Math.round(Math.max(rect.width, 1) / PIXEL_CSS));
+    const artH = Math.max(1, Math.round(Math.max(rect.height, 1) / PIXEL_CSS));
+    if (canvas.width !== artW || canvas.height !== artH) {
+      canvas.width = artW;
+      canvas.height = artH;
     }
-    const viewW = Math.max(1, rect.width);
-    const viewH = Math.max(1, rect.height);
-    const portrait = viewH > viewW;
-    const padX = 36;
-    const padY = portrait ? 220 : 80;
-    const zoom = Math.min(viewW / (map.w + padX * 2), viewH / (map.h + padY));
-    const lookY = map.h / 2 + (portrait ? 24 : 0);
-    const camX = map.w / 2 - viewW / (2 * zoom);
-    const camY = lookY - viewH / (2 * zoom);
-    return { zoom, camX, camY, dpr, rect };
+    return { artW, artH, viewW: artW * WORLD_PER_ART, viewH: artH * WORLD_PER_ART, camX, camY, rect };
+  }
+
+  function easeCamera(dt: number): void {
+    const frame = measure();
+    const portrait = frame.rect.height > frame.rect.width;
+    const lookX = player.x;
+    const lookY = player.y + (portrait ? Math.min(96, frame.viewH * 0.14) : 0);
+    let targetX = lookX - frame.viewW / 2;
+    let targetY = lookY - frame.viewH / 2;
+    if (frame.viewW >= map.w) targetX = (map.w - frame.viewW) / 2;
+    else targetX = clamp(targetX, 0, map.w - frame.viewW);
+    if (frame.viewH >= map.h) targetY = (map.h - frame.viewH) / 2;
+    else targetY = clamp(targetY, 0, map.h - frame.viewH);
+    const blend = 1 - Math.exp(-8 * dt);
+    camX += (targetX - camX) * blend;
+    camY += (targetY - camY) * blend;
+    camX = quant(camX);
+    camY = quant(camY);
+  }
+
+  function currentView(): Frame {
+    return measure();
   }
 
   function clientToWorld(clientX: number, clientY: number): { x: number; y: number } {
     const view = currentView();
-    return {
-      x: (clientX - view.rect.left) / view.zoom + view.camX,
-      y: (clientY - view.rect.top) / view.zoom + view.camY,
-    };
+    const sx = (clientX - view.rect.left) / Math.max(1, view.rect.width);
+    const sy = (clientY - view.rect.top) / Math.max(1, view.rect.height);
+    return { x: view.camX + sx * view.viewW, y: view.camY + sy * view.viewH };
   }
-
   function commandsFromPlayer(source: InputController, tank: Tank): TankCommands {
     const drive = source.getDrive();
     const aim = source.getAimStick();
@@ -960,6 +1000,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       stepDecor(dt);
       acc = 0;
     }
+    easeCamera(dt);
     draw();
     raf = requestAnimationFrame(frame);
   }
