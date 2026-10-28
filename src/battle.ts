@@ -3,7 +3,7 @@ import { el } from "./dom";
 import { CELL, cellCenter, listGuns } from "./geometry";
 import { applyRepair, damageInstance, nextRepair } from "./grid";
 import { attachInput, type InputController } from "./input";
-import { clamp, localToWorld, rotateToward, worldToLocal } from "./math";
+import { angleDelta, clamp, localToWorld, rotateToward, worldToLocal } from "./math";
 import { hitsBlock, hitsHazard, pickMap, resolveTank, TILE, type ArenaMap, type MapBlock } from "./maps";
 import { PAL } from "./palette";
 import {
@@ -24,9 +24,13 @@ import type { ModuleKind } from "./types";
 
 const TURRET_TURN = 4.6;
 const LAVA_DPS = 18;
-/** World units per internal art pixel. Even sizes (cell 24, tile 32) land on the grid. */
-const WORLD_PER_ART = 2;
-const PIXEL_CSS = 2;
+/**
+ * World units per art pixel. 8 divides both the 24px cell and the 32px map tile,
+ * so blocks stay on the pixel grid. The screen then scales those art pixels by an
+ * integer so a tank is about 70–80 CSS px tall.
+ */
+const WORLD_PER_ART = 8;
+const TANK_WORLD = 7 * 24;
 
 interface Sprite {
   canvas: HTMLCanvasElement;
@@ -43,6 +47,7 @@ function makeSprite(): Sprite {
 const hullSprite = makeSprite();
 const turretSprite = makeSprite();
 const shotSprite = makeSprite();
+const worldBuffer = makeSprite();
 
 function quant(value: number): number {
   return Math.round(value / WORLD_PER_ART) * WORLD_PER_ART;
@@ -141,6 +146,8 @@ interface TankDebug {
   rivalX: number;
   rivalY: number;
   map: string;
+  cam: number;
+  viewW: number;
   lastVolley: Array<{ mount: "hull" | "turret"; angle: number }>;
 }
 
@@ -225,6 +232,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   if (!ctx) throw new Error("Canvas unavailable");
   const context = ctx;
   let pen: CanvasRenderingContext2D = context;
+  let surface: CanvasRenderingContext2D = context;
   const input = attachInput(moveStick.base, moveStick.knob, aimStick.base, aimStick.knob);
   const rivalAi = createBotController(options.rivalTuning);
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -243,6 +251,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   let rival = spawnTank("rival", options.rivalName, options.rivalGrid, map.spawnB.x, map.spawnB.y, Math.PI, options.rivalHull);
   let camX = 0;
   let camY = 0;
+  let camAngle = 0;
   let shots: Shot[] = [];
   let particles: Particle[] = [];
   let floaters: Floater[] = [];
@@ -470,15 +479,20 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
 
   function draw(): void {
     const view = currentView();
-    const jx = shake > 0 && !reduceMotion ? quant((Math.random() - 0.5) * shake * 2) : 0;
-    const jy = shake > 0 && !reduceMotion ? quant((Math.random() - 0.5) * shake * 2) : 0;
-    context.imageSmoothingEnabled = false;
-    context.setTransform(1, 0, 0, 1, 0, 0);
-    context.fillStyle = PAL.void;
-    context.fillRect(0, 0, view.artW, view.artH);
+    const cover = Math.ceil(Math.hypot(view.artW, view.artH)) + 4;
+    if (worldBuffer.canvas.width !== cover || worldBuffer.canvas.height !== cover) {
+      worldBuffer.canvas.width = cover;
+      worldBuffer.canvas.height = cover;
+    }
+    const world = worldBuffer.ctx;
+    world.imageSmoothingEnabled = false;
+    world.setTransform(1, 0, 0, 1, 0, 0);
+    world.fillStyle = PAL.void;
+    world.fillRect(0, 0, cover, cover);
     const scale = 1 / WORLD_PER_ART;
-    context.setTransform(scale, 0, 0, scale, (-view.camX + jx) * scale, (-view.camY + jy) * scale);
-    pen = context;
+    world.setTransform(scale, 0, 0, scale, cover / 2 - camX * scale, cover / 2 - camY * scale);
+    pen = world;
+    surface = world;
     drawArena();
     drawTank(rival, PAL.redDark);
     drawTank(player, PAL.navy);
@@ -490,75 +504,114 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       blit(shotSprite, shot.x, shot.y, Math.atan2(shot.vy, shot.vx), 18, 8);
     }
     for (const bit of particles) {
-      const step = bit.life > bit.max * 0.6 ? 6 : bit.life > bit.max * 0.3 ? 4 : 2;
-      box(bit.x, bit.y, step, step, bit.color);
+      box(bit.x, bit.y, 8, 8, bit.color);
     }
+    pen = context;
+    surface = context;
+
+    const jx = shake > 0 && !reduceMotion ? Math.round((Math.random() - 0.5) * 3) : 0;
+    const jy = shake > 0 && !reduceMotion ? Math.round((Math.random() - 0.5) * 3) : 0;
+    const ox = Math.floor((view.deviceW - view.artW * view.devicePerArt) / 2);
+    const oy = Math.floor((view.deviceH - view.artH * view.devicePerArt) / 2);
+    context.imageSmoothingEnabled = false;
     context.setTransform(1, 0, 0, 1, 0, 0);
+    context.fillStyle = PAL.void;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.setTransform(view.devicePerArt, 0, 0, view.devicePerArt, ox + jx * view.devicePerArt, oy + jy * view.devicePerArt);
+    context.translate(view.artW / 2, view.artH / 2);
+    context.rotate(-camAngle);
+    context.drawImage(worldBuffer.canvas, -cover / 2, -cover / 2);
+
+    context.setTransform(view.devicePerArt, 0, 0, view.devicePerArt, ox, oy);
     context.font = "8px 'Press Start 2P', monospace";
     context.textAlign = "center";
-    context.textBaseline = "middle";
+    context.textBaseline = "bottom";
     for (const floater of floaters) {
       if (floater.life < 0.25) continue;
-      artText(floater.text, floater.x, floater.y, PAL.paper);
+      artText(floater.text, floater.x, floater.y, view, PAL.paper);
     }
+    for (const tank of [rival, player]) drawTankLabel(tank, view);
     drawMinimap(view);
     drawArrow(view);
   }
 
-  function artText(text: string, worldX: number, worldY: number, color: string): void {
-    const ax = Math.round((worldX - camX) / WORLD_PER_ART);
-    const ay = Math.round((worldY - camY) / WORLD_PER_ART);
+  /** Screen art pixel for a world point after the camera rotation. Screen up is the player's facing. */
+  function worldToArt(x: number, y: number, artW: number, artH: number): { x: number; y: number } {
+    const dx = x - camX;
+    const dy = y - camY;
+    const cos = Math.cos(camAngle);
+    const sin = Math.sin(camAngle);
+    const rx = dx * cos + dy * sin;
+    const ry = -dx * sin + dy * cos;
+    return { x: artW / 2 + rx / WORLD_PER_ART, y: artH / 2 + ry / WORLD_PER_ART };
+  }
+
+  function artText(text: string, worldX: number, worldY: number, view: Frame, color: string): void {
+    const at = worldToArt(worldX, worldY, view.artW, view.artH);
+    const ax = Math.round(at.x);
+    const ay = Math.round(at.y);
     context.fillStyle = PAL.shadow;
     context.fillText(text, ax + 1, ay + 1);
     context.fillStyle = color;
     context.fillText(text, ax, ay);
   }
 
+  function drawTankLabel(tank: Tank, view: Frame): void {
+    const at = worldToArt(tank.x, tank.y, view.artW, view.artH);
+    const ax = Math.round(at.x);
+    const ay = Math.round(at.y) - 18;
+    context.fillStyle = PAL.shadow;
+    context.fillText(tank.name, ax + 1, ay + 1);
+    context.fillStyle = PAL.paper;
+    context.fillText(tank.name, ax, ay);
+    context.fillStyle = PAL.shadow;
+    context.fillRect(ax - 8, ay + 3, 16, 2);
+    context.fillStyle = tank.id === "player" ? PAL.green : PAL.red;
+    context.fillRect(ax - 8, ay + 3, Math.round(16 * clamp(tank.core / tank.coreMax, 0, 1)), 2);
+  }
+
   function drawMinimap(view: Frame): void {
     const cols = Math.round(map.w / TILE);
     const rows = Math.round(map.h / TILE);
-    const ox = view.artW - cols - 6;
-    const oy = Math.max(6, Math.round(view.artH * 0.38));
+    const step = 2;
+    const mw = Math.ceil(cols / step);
+    const mh = Math.ceil(rows / step);
+    const ox = view.artW - mw - 4;
+    const oy = Math.max(4, Math.round(view.artH * 0.4));
     context.fillStyle = PAL.shadow;
-    context.fillRect(ox - 2, oy - 2, cols + 4, rows + 4);
+    context.fillRect(ox - 1, oy - 1, mw + 2, mh + 2);
     context.fillStyle = PAL.paper;
-    context.fillRect(ox - 2, oy - 2, cols + 4, 1);
-    context.fillRect(ox - 2, oy - 2, 1, rows + 4);
+    context.fillRect(ox - 1, oy - 1, mw + 2, 1);
+    context.fillRect(ox - 1, oy - 1, 1, mh + 2);
     context.fillStyle = map.ground;
-    context.fillRect(ox, oy, cols, rows);
+    context.fillRect(ox, oy, mw, mh);
     for (const block of map.blocks) {
       context.fillStyle = block.color;
-      context.fillRect(ox + block.x / TILE, oy + block.y / TILE, Math.max(1, block.w / TILE), Math.max(1, block.h / TILE));
+      context.fillRect(Math.floor(ox + block.x / (TILE * step)), Math.floor(oy + block.y / (TILE * step)), 1, 1);
     }
     for (const pool of map.hazards) {
       context.fillStyle = PAL.lava;
-      context.fillRect(ox + pool.x / TILE, oy + pool.y / TILE, Math.max(1, pool.w / TILE), Math.max(1, pool.h / TILE));
+      context.fillRect(Math.floor(ox + pool.x / (TILE * step)), Math.floor(oy + pool.y / (TILE * step)), 1, 1);
     }
     const mark = (x: number, y: number, color: string): void => {
       context.fillStyle = color;
-      context.fillRect(ox + Math.floor(x / TILE), oy + Math.floor(y / TILE), 2, 2);
+      context.fillRect(Math.round(ox + x / (TILE * step) - 1), Math.round(oy + y / (TILE * step) - 1), 2, 2);
     };
     mark(rival.x, rival.y, PAL.red);
     mark(player.x, player.y, PAL.cyan);
-    const vx = ox + camX / TILE;
-    const vy = oy + camY / TILE;
-    const vw = Math.max(4, view.viewW / TILE);
-    const vh = Math.max(4, view.viewH / TILE);
-    context.fillStyle = PAL.paper;
-    const tick = 3;
-    context.fillRect(vx, vy, tick, 1);
-    context.fillRect(vx, vy, 1, tick);
-    context.fillRect(vx + vw - tick, vy, tick, 1);
-    context.fillRect(vx + vw - 1, vy, 1, tick);
-    context.fillRect(vx, vy + vh - 1, tick, 1);
-    context.fillRect(vx, vy + vh - tick, 1, tick);
-    context.fillRect(vx + vw - tick, vy + vh - 1, tick, 1);
-    context.fillRect(vx + vw - 1, vy + vh - tick, 1, tick);
+    context.fillStyle = PAL.gold;
+    context.fillRect(
+      Math.round(ox + player.x / (TILE * step) + Math.sin(player.angle) * 3),
+      Math.round(oy + player.y / (TILE * step) - Math.cos(player.angle) * 3),
+      2,
+      2,
+    );
   }
 
   function drawArrow(view: Frame): void {
-    const ax = (rival.x - camX) / WORLD_PER_ART;
-    const ay = (rival.y - camY) / WORLD_PER_ART;
+    const at = worldToArt(rival.x, rival.y, view.artW, view.artH);
+    const ax = at.x;
+    const ay = at.y;
     const left = 16;
     const right = view.artW - 16;
     const top = Math.round(view.artH * 0.36);
@@ -689,20 +742,6 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       if (tank.flash > 0) dither(tank, true);
     });
     blit(turretSprite, tank.x + pivoted.x, tank.y + pivoted.y, tank.turret, span, span);
-
-    context.save();
-    context.setTransform(1, 0, 0, 1, 0, 0);
-    context.font = "8px 'Press Start 2P', monospace";
-    context.textAlign = "center";
-    context.textBaseline = "bottom";
-    artText(tank.name, tank.x, tank.y - bodyH * 0.62, PAL.paper);
-    const ax = Math.round((tank.x - camX) / WORLD_PER_ART);
-    const ay = Math.round((tank.y - bodyH * 0.62 - camY) / WORLD_PER_ART) + 4;
-    context.fillStyle = PAL.shadow;
-    context.fillRect(ax - 14, ay, 28, 3);
-    context.fillStyle = tank.id === "player" ? PAL.green : PAL.red;
-    context.fillRect(ax - 14, ay, Math.round(28 * clamp(tank.core / tank.coreMax, 0, 1)), 3);
-    context.restore();
   }
 
   function dither(tank: Tank, turretLayer: boolean): void {
@@ -871,16 +910,16 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     );
     pen = ctx;
     drawLocal();
-    pen = context;
+    pen = surface;
   }
 
   function blit(sprite: Sprite, x: number, y: number, angle: number, worldW: number, worldH: number): void {
-    context.imageSmoothingEnabled = false;
-    context.save();
-    context.translate(quant(x), quant(y));
-    context.rotate(angle);
-    context.drawImage(sprite.canvas, -worldW / 2, -worldH / 2, worldW, worldH);
-    context.restore();
+    surface.imageSmoothingEnabled = false;
+    surface.save();
+    surface.translate(quant(x), quant(y));
+    surface.rotate(angle);
+    surface.drawImage(sprite.canvas, -worldW / 2, -worldH / 2, worldW, worldH);
+    surface.restore();
   }
 
   interface Frame {
@@ -888,6 +927,9 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     artH: number;
     viewW: number;
     viewH: number;
+    devicePerArt: number;
+    deviceW: number;
+    deviceH: number;
     camX: number;
     camY: number;
     rect: DOMRect;
@@ -895,29 +937,47 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
 
   function measure(): Frame {
     const rect = canvas.getBoundingClientRect();
-    const artW = Math.max(1, Math.round(Math.max(rect.width, 1) / PIXEL_CSS));
-    const artH = Math.max(1, Math.round(Math.max(rect.height, 1) / PIXEL_CSS));
-    if (canvas.width !== artW || canvas.height !== artH) {
-      canvas.width = artW;
-      canvas.height = artH;
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    const tankArt = TANK_WORLD / WORLD_PER_ART;
+    const targetCss = rect.width >= 800 ? 60 : 76;
+    const devicePerArt = Math.max(2, Math.round((targetCss * dpr) / tankArt));
+    const deviceW = Math.max(1, Math.round(Math.max(rect.width, 1) * dpr));
+    const deviceH = Math.max(1, Math.round(Math.max(rect.height, 1) * dpr));
+    const artW = Math.max(1, Math.floor(deviceW / devicePerArt));
+    const artH = Math.max(1, Math.floor(deviceH / devicePerArt));
+    if (canvas.width !== deviceW || canvas.height !== deviceH) {
+      canvas.width = deviceW;
+      canvas.height = deviceH;
     }
-    return { artW, artH, viewW: artW * WORLD_PER_ART, viewH: artH * WORLD_PER_ART, camX, camY, rect };
+    return {
+      artW,
+      artH,
+      viewW: artW * WORLD_PER_ART,
+      viewH: artH * WORLD_PER_ART,
+      devicePerArt,
+      deviceW,
+      deviceH,
+      camX,
+      camY,
+      rect,
+    };
   }
 
   function easeCamera(dt: number): void {
     const frame = measure();
-    const portrait = frame.rect.height > frame.rect.width;
-    const lookX = player.x;
-    const lookY = player.y + (portrait ? Math.min(96, frame.viewH * 0.14) : 0);
-    let targetX = lookX - frame.viewW / 2;
-    let targetY = lookY - frame.viewH / 2;
-    if (frame.viewW >= map.w) targetX = (map.w - frame.viewW) / 2;
-    else targetX = clamp(targetX, 0, map.w - frame.viewW);
-    if (frame.viewH >= map.h) targetY = (map.h - frame.viewH) / 2;
-    else targetY = clamp(targetY, 0, map.h - frame.viewH);
-    const blend = 1 - Math.exp(-8 * dt);
-    camX += (targetX - camX) * blend;
-    camY += (targetY - camY) * blend;
+    const ahead = frame.viewH * 0.2;
+    const targetX = player.x + Math.sin(player.angle) * ahead;
+    const targetY = player.y - Math.cos(player.angle) * ahead;
+    if (reduceMotion) {
+      camX = targetX;
+      camY = targetY;
+      camAngle = player.angle;
+    } else {
+      const blend = 1 - Math.exp(-8 * dt);
+      camX += (targetX - camX) * blend;
+      camY += (targetY - camY) * blend;
+      camAngle += angleDelta(camAngle, player.angle) * (1 - Math.exp(-12 * dt));
+    }
     camX = quant(camX);
     camY = quant(camY);
   }
@@ -928,14 +988,18 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
 
   function clientToWorld(clientX: number, clientY: number): { x: number; y: number } {
     const view = currentView();
-    const sx = (clientX - view.rect.left) / Math.max(1, view.rect.width);
-    const sy = (clientY - view.rect.top) / Math.max(1, view.rect.height);
-    return { x: view.camX + sx * view.viewW, y: view.camY + sy * view.viewH };
+    const sx = ((clientX - view.rect.left) / Math.max(1, view.rect.width)) * view.artW - view.artW / 2;
+    const sy = ((clientY - view.rect.top) / Math.max(1, view.rect.height)) * view.artH - view.artH / 2;
+    const rx = sx * WORLD_PER_ART;
+    const ry = sy * WORLD_PER_ART;
+    const cos = Math.cos(camAngle);
+    const sin = Math.sin(camAngle);
+    return { x: camX + rx * cos - ry * sin, y: camY + rx * sin + ry * cos };
   }
   function commandsFromPlayer(source: InputController, tank: Tank): TankCommands {
     const drive = source.getDrive();
     const aim = source.getAimStick();
-    if (aim.active) return { forward: drive.forward, turn: drive.turn, aimAngle: aim.angle, fire: true };
+    if (aim.active) return { forward: drive.forward, turn: drive.turn, aimAngle: aim.angle + camAngle, fire: true };
     let aimAngle: number | null = null;
     const mouse = source.getMouseClient();
     if (mouse.valid) {
@@ -1033,6 +1097,8 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       rivalX: rival.x,
       rivalY: rival.y,
       map: map.id,
+      cam: camAngle,
+      viewW: measure().viewW,
       lastVolley,
     });
   }
