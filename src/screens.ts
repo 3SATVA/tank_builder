@@ -18,12 +18,22 @@ import {
   SHOP_ITEMS,
   type PartRole,
 } from "./modules";
+import {
+  cleanCallsign,
+  findOpponent,
+  loadLeaderboard,
+  publishDefense,
+  readIdentity,
+  readRating,
+  registerCallsign,
+  type PvpLaunch,
+} from "./pvp";
 import { activeLayout, purchase } from "./save";
 import { sfxTap } from "./sfx";
 import { computeStats } from "./stats";
 import type { ModuleDef, SaveData, ShopItem, TankStats } from "./types";
 
-export type ScreenId = "menu" | "garage" | "battle" | "shop" | "bots";
+export type ScreenId = "menu" | "garage" | "battle" | "shop" | "bots" | "pvp" | "board";
 
 function scrapLabel(amount: number): string {
   return `${amount.toLocaleString()} scrap`;
@@ -47,6 +57,7 @@ export function renderMenu(save: SaveData, go: (screen: ScreenId) => void): HTML
   actions.append(
     menuButton("Garage", "Build and refit the hull", () => go("garage")),
     menuButton("Battle", "Pick a rival and duel", () => go("bots"), true),
+    menuButton("PvP", "Fight another pilot's tank", () => go("pvp")),
     menuButton("Shop", "Spend scrap on new blocks", () => go("shop")),
   );
 
@@ -220,7 +231,26 @@ function buildStage(
     persist();
     paint();
   });
-  tools.append(reset);
+  const defend = el("button", "btn", "Set as PvP defense");
+  defend.type = "button";
+  const posted = el("p", "pvp-status", "");
+  posted.setAttribute("role", "status");
+  defend.addEventListener("click", () => {
+    sfxTap();
+    defend.disabled = true;
+    posted.textContent = "Posting defense…";
+    void publishDefense(save.hull, activeLayout(save))
+      .then((message) => {
+        posted.textContent = message;
+      })
+      .catch((err: unknown) => {
+        posted.textContent = err instanceof Error ? err.message : "Couldn't post the defense.";
+      })
+      .finally(() => {
+        defend.disabled = false;
+      });
+  });
+  tools.append(reset, defend, posted);
   stage.append(wrap, tools);
   return stage;
 }
@@ -578,4 +608,167 @@ function shopCard(save: SaveData, item: ShopItem, persist: () => void, paint: ()
   foot.append(button);
   card.append(head, foot);
   return card;
+}
+
+export function renderPvp(go: (screen: ScreenId) => void, onFight: (launch: PvpLaunch) => void): HTMLElement {
+  const root = el("div", "screen shop-screen");
+  const paint = (): void => {
+    const identity = readIdentity();
+    const bar = el("header", "topbar");
+    const back = el("button", "btn btn-ghost", "Menu");
+    back.type = "button";
+    back.addEventListener("click", () => go("menu"));
+    const board = el("button", "btn", "Leaderboard");
+    board.type = "button";
+    board.addEventListener("click", () => {
+      sfxTap();
+      go("board");
+    });
+    bar.append(el("span", "brand", "PvP"), board, back);
+
+    const body = el("div", "pvp-body");
+    const rating = readRating();
+    const who = identity
+      ? `${identity.name} · ${rating === null ? "Unranked" : `rating ${rating}`}`
+      : "Pick a callsign to join the yard.";
+    body.append(el("p", "pvp-status", who));
+
+    if (!identity) {
+      body.append(callsignForm(paint));
+    } else {
+      body.append(finder(onFight));
+    }
+    root.replaceChildren(bar, body);
+  };
+  paint();
+  return root;
+}
+
+function callsignForm(done: () => void): HTMLElement {
+  const form = el("form", "shop-card callsign-form");
+  const label = el("label", "palette-name", "Callsign");
+  label.htmlFor = "callsign";
+  const input = el("input", "callsign-input") as HTMLInputElement;
+  input.id = "callsign";
+  input.type = "text";
+  input.maxLength = 20;
+  input.required = true;
+  input.autocomplete = "off";
+  input.placeholder = "Up to 20 characters";
+  const status = el("p", "pvp-status", "");
+  status.setAttribute("role", "status");
+  const submit = el("button", "btn btn-primary", "Register");
+  submit.type = "submit";
+  form.append(label, input, status, submit);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const name = cleanCallsign(input.value);
+    if (!name) {
+      status.textContent = "Enter a callsign.";
+      return;
+    }
+    submit.disabled = true;
+    status.textContent = "Registering…";
+    void registerCallsign(name)
+      .then(() => done())
+      .catch((err: unknown) => {
+        status.textContent = err instanceof Error ? err.message : "Couldn't register.";
+        submit.disabled = false;
+      });
+  });
+  return form;
+}
+
+function finder(onFight: (launch: PvpLaunch) => void): HTMLElement {
+  const wrap = el("div", "shop-list");
+  const find = el("button", "btn btn-primary", "Find opponent");
+  find.type = "button";
+  const status = el("p", "pvp-status", "Find a posted defense, then fight it.");
+  status.setAttribute("role", "status");
+  const slot = el("div");
+  find.addEventListener("click", () => {
+    sfxTap();
+    find.disabled = true;
+    status.textContent = "Looking for a rival…";
+    slot.replaceChildren();
+    void findOpponent()
+      .then((opponent) => {
+        if (!opponent) {
+          status.textContent = "No rivals yet. A yard bot will stand in.";
+          const fight = el("button", "btn btn-primary", "Fight the stand-in");
+          fight.type = "button";
+          fight.addEventListener("click", () => {
+            sfxTap();
+            onFight({ kind: "standin" });
+          });
+          slot.append(fight);
+          return;
+        }
+        status.textContent = "";
+        const card = el("article", "shop-card");
+        card.dataset.pvp = "found";
+        card.append(
+          el("h3", undefined, opponent.name),
+          el("p", "shop-tagline", `Rating ${opponent.rating} · ${opponent.wins} wins · ${opponent.losses} losses`),
+        );
+        const fight = el("button", "btn btn-primary", "Fight");
+        fight.type = "button";
+        fight.addEventListener("click", () => {
+          sfxTap();
+          onFight({ kind: "rival", opponent });
+        });
+        card.append(fight);
+        slot.append(card);
+      })
+      .catch((err: unknown) => {
+        status.textContent = err instanceof Error ? err.message : "Couldn't look for a rival.";
+      })
+      .finally(() => {
+        find.disabled = false;
+      });
+  });
+  wrap.append(find, status, slot);
+  return wrap;
+}
+
+export function renderLeaderboard(go: (screen: ScreenId) => void): HTMLElement {
+  const root = el("div", "screen shop-screen");
+  const bar = el("header", "topbar");
+  const back = el("button", "btn btn-ghost", "PvP");
+  back.type = "button";
+  back.addEventListener("click", () => go("pvp"));
+  bar.append(el("span", "brand", "Leaderboard"), back);
+  const body = el("div", "pvp-body");
+  const identity = readIdentity();
+  const rating = readRating();
+  body.append(
+    el(
+      "p",
+      "pvp-status",
+      identity ? `${identity.name} · ${rating === null ? "Unranked" : `rating ${rating}`}` : "Register under PvP to get a rating.",
+    ),
+  );
+  const status = el("p", "pvp-status", "Loading…");
+  status.setAttribute("role", "status");
+  const list = el("div", "board-list");
+  body.append(status, list);
+  root.append(bar, body);
+  void loadLeaderboard()
+    .then((rows) => {
+      status.textContent = rows.length === 0 ? "No rated pilots yet." : "Top 20";
+      rows.forEach((row, index) => {
+        const line = el("article", identity && row.name === identity.name ? "shop-card board-row you" : "shop-card board-row");
+        line.append(
+          el("span", "board-rank", String(index + 1)),
+          el("span", "palette-name", row.name),
+          el("span", undefined, String(row.rating)),
+          el("span", "palette-blurb", `${row.wins}–${row.losses}`),
+        );
+        list.append(line);
+      });
+    })
+    .catch((err: unknown) => {
+      status.textContent = err instanceof Error ? err.message : "Leaderboard is offline.";
+    });
+  return root;
 }

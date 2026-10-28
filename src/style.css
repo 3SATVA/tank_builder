@@ -529,12 +529,40 @@ h2 {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.battle-note {
+.battle-note, .pvp-status {
   margin: 0;
   color: var(--amber);
   font-weight: 800;
 }
-.builder-tools { display: flex; justify-content: center; }
+.pvp-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+  width: min(560px, 100%);
+}
+.pvp-body .btn-primary { align-self: stretch; }
+.callsign-form { display: grid; gap: 10px; width: min(560px, 100%); }
+.callsign-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 3px solid var(--line);
+  border-radius: 12px;
+  background: var(--ink-2);
+  font: inherit;
+}
+.board-list { display: grid; gap: 8px; width: min(560px, 100%); }
+.board-row {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+.board-rank { font-weight: 800; color: var(--amber); }
+.board-row.you { outline: 3px solid var(--amber); }
+.builder-tools { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; }
+.builder-tools .pvp-status { flex-basis: 100%; text-align: center; }
 
 .stats-panel, .palette, .empty-shop, .shop-card, .end-panel {
   background: var(--panel);
@@ -927,6 +955,8 @@ html[data-art="pixel"] .scrap-pill,
 html[data-art="pixel"] .stats-panel,
 html[data-art="pixel"] .palette,
 html[data-art="pixel"] .shop-card,
+html[data-art="pixel"] .callsign-input,
+html[data-art="pixel"] .board-row,
 html[data-art="pixel"] .end-panel,
 html[data-art="pixel"] .hud-readout,
 html[data-art="pixel"] .map-banner,

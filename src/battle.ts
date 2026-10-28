@@ -159,6 +159,11 @@ export interface BattleOptions {
   onExit: () => void;
   onGarage: () => void;
   onRivals: () => void;
+  /** Shown on the end card instead of the stock scrap line. */
+  summary?: (won: boolean) => string;
+  /** Extra line after the fight, such as a rating change. */
+  onSettle?: (won: boolean) => Promise<string | null>;
+  rivalsLabel?: string;
 }
 
 interface TankDebug {
@@ -259,7 +264,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   retry.type = "button";
   const garage = el("button", "btn", "Garage");
   garage.type = "button";
-  const rivals = el("button", "btn", "Rivals");
+  const rivals = el("button", "btn", options.rivalsLabel ?? "Rivals");
   rivals.type = "button";
   const endActions = el("div", "end-actions");
   endActions.append(retry, rivals, garage);
@@ -540,9 +545,23 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       options.onWin();
     }
     endTitle.textContent = result === "win" ? "You won" : "Hull breached";
-    endCopy.textContent = result === "win" ? `${options.scrap} scrap banked.` : `${options.rivalName} kept the field.`;
+    const won = result === "win";
+    endCopy.textContent = options.summary
+      ? options.summary(won)
+      : won
+        ? `${options.scrap} scrap banked.`
+        : `${options.rivalName} kept the field.`;
     endcard.hidden = false;
     sfxBoom();
+    if (options.onSettle) {
+      void options.onSettle(won).then((extra) => {
+        if (!extra || phase !== result) return;
+        endCopy.textContent = `${endCopy.textContent} ${extra}`;
+      }).catch(() => {
+        if (phase !== result) return;
+        endCopy.textContent = `${endCopy.textContent} Rating didn't update.`;
+      });
+    }
   }
 
   function draw(): void {
