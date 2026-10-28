@@ -542,38 +542,46 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     mark(player.x, player.y, PAL.cyan);
     const vx = ox + camX / TILE;
     const vy = oy + camY / TILE;
-    const vw = view.viewW / TILE;
-    const vh = view.viewH / TILE;
+    const vw = Math.max(4, view.viewW / TILE);
+    const vh = Math.max(4, view.viewH / TILE);
     context.fillStyle = PAL.paper;
-    context.fillRect(vx, vy, vw, 1);
-    context.fillRect(vx, vy + vh - 1, vw, 1);
-    context.fillRect(vx, vy, 1, vh);
-    context.fillRect(vx + vw - 1, vy, 1, vh);
+    const tick = 3;
+    context.fillRect(vx, vy, tick, 1);
+    context.fillRect(vx, vy, 1, tick);
+    context.fillRect(vx + vw - tick, vy, tick, 1);
+    context.fillRect(vx + vw - 1, vy, 1, tick);
+    context.fillRect(vx, vy + vh - 1, tick, 1);
+    context.fillRect(vx, vy + vh - tick, 1, tick);
+    context.fillRect(vx + vw - tick, vy + vh - 1, tick, 1);
+    context.fillRect(vx + vw - 1, vy + vh - tick, 1, tick);
   }
 
   function drawArrow(view: Frame): void {
     const ax = (rival.x - camX) / WORLD_PER_ART;
     const ay = (rival.y - camY) / WORLD_PER_ART;
-    const pad = 12;
-    if (ax > pad && ay > pad && ax < view.artW - pad && ay < view.artH - pad) return;
-    const cx = view.artW / 2;
-    const cy = view.artH / 2;
+    const left = 16;
+    const right = view.artW - 16;
+    const top = Math.round(view.artH * 0.36);
+    const bottom = Math.round(view.artH * 0.72);
+    if (ax > left && ax < right && ay > top && ay < bottom) return;
+    const cx = (left + right) / 2;
+    const cy = (top + bottom) / 2;
     const dx = ax - cx;
     const dy = ay - cy;
     const dist = Math.hypot(dx, dy) || 1;
-    const hw = view.artW / 2 - pad;
-    const hh = view.artH / 2 - pad;
-    const reach = Math.min(hw / (Math.abs(dx) / dist), hh / (Math.abs(dy) / dist));
+    const hw = (right - left) / 2;
+    const hh = (bottom - top) / 2;
+    const reach = Math.min(hw / Math.max(1e-4, Math.abs(dx) / dist), hh / Math.max(1e-4, Math.abs(dy) / dist));
     const px = Math.round(cx + (dx / dist) * reach);
     const py = Math.round(cy + (dy / dist) * reach);
     context.fillStyle = PAL.shadow;
-    context.fillRect(px - 4, py - 4, 8, 8);
+    context.fillRect(px - 6, py - 6, 12, 12);
     context.fillStyle = PAL.red;
-    context.fillRect(px - 3, py - 3, 6, 6);
+    context.fillRect(px - 5, py - 5, 10, 10);
     context.fillStyle = PAL.gold;
-    const ux = Math.round((dx / dist) * 2);
-    const uy = Math.round((dy / dist) * 2);
-    context.fillRect(px - 1 + ux, py - 1 + uy, 2, 2);
+    const ux = Math.round((dx / dist) * 3);
+    const uy = Math.round((dy / dist) * 3);
+    context.fillRect(px - 2 + ux, py - 2 + uy, 4, 4);
   }
 
   function drawArena(): void {

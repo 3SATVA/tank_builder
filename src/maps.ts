@@ -119,8 +119,8 @@ const SPECS: readonly MapSpec[] = [
   {
     id: "fortress",
     name: "Fortress",
-    ground: PAL.stoneDark,
-    alt: PAL.brown,
+    ground: PAL.stone,
+    alt: PAL.stoneDark,
     edge: PAL.shadow,
     kinds: { "#": { color: PAL.stone }, K: { color: PAL.grayDark } },
     rows: [
