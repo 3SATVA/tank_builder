@@ -1,7 +1,7 @@
 import { BOTS, botOpen } from "./bots";
 import { el } from "./dom";
 import { commitPlacement } from "./grid";
-import { iconSvg } from "./icons";
+import { mountSprite } from "./sprites";
 import {
   createDefaultGrid,
   getHull,
@@ -243,27 +243,7 @@ function hullPicker(save: SaveData, persist: () => void, paint: () => void): HTM
 }
 
 function moduleFace(mod: ModuleDef, end: "front" | "rear" = "front"): HTMLElement {
-  if (mod.id === "medium-cannon") {
-    const face = el("span", end === "rear" ? "cannon-face medium rear" : "cannon-face medium");
-    if (end === "rear") face.append(el("span", "breech"));
-    else face.append(el("span", "barrel"), el("span", "breech"));
-    return face;
-  }
-  if (mod.kind === "weapon") {
-    const face = el("span", "cannon-face");
-    face.append(el("span", "barrel"), el("span", "breech"));
-    return face;
-  }
-  if (mod.kind === "engine") {
-    const face = el("span", "engine-face");
-    const pots = el("span", "pots");
-    pots.append(el("span", "pot"), el("span", "pot"), el("span", "pot"));
-    face.append(pots, el("span", "pipe left"), el("span", "pipe right"), el("span", "puff"));
-    return face;
-  }
-  const swatch = el("span", "cell-swatch");
-  swatch.innerHTML = iconSvg(mod.kind, mod.id);
-  return swatch;
+  return mountSprite(mod.id, 5, { rear: mod.id === "medium-cannon" && end === "rear" });
 }
 
 function buildSide(
@@ -337,7 +317,7 @@ function palette(
     button.setAttribute("aria-pressed", mod.id === selected ? "true" : "false");
     const swatch = el("span", "swatch");
     swatch.style.background = mod.color;
-    swatch.innerHTML = iconSvg(mod.kind, mod.id);
+    swatch.append(mountSprite(mod.id, 4, {}, true));
     const text = el("span", "palette-copy");
     text.append(el("span", "palette-name", mod.name), el("span", "palette-blurb", mod.blurb));
     button.append(swatch, text);
@@ -458,7 +438,7 @@ function shopCard(save: SaveData, item: ShopItem, persist: () => void, paint: ()
     const swatch = el("span", "swatch");
     if (mod) {
       swatch.style.background = mod.color;
-      swatch.innerHTML = iconSvg(mod.kind, mod.id);
+      swatch.append(mountSprite(mod.id, 4, {}, true));
     }
     head.append(swatch);
   } else {
