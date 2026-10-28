@@ -1,4 +1,5 @@
-import { cloneGrid, createDefaultGrid, emptyGrid, getHull, getModule, hullSize, moduleIdOf } from "./modules";
+import { BOTS } from "./bots";
+import { cloneGrid, createDefaultGrid, emptyGrid, getHull, getModule, hullSize, isBossHull, isBossModule, moduleIdOf } from "./modules";
 import type { SaveData, ShopItem } from "./types";
 
 const KEY = "tank-builder-save-v4";
@@ -33,7 +34,13 @@ function fitsHull(grid: (string | null)[][], hullId: string): boolean {
 }
 
 function cleanGrid(grid: (string | null)[][]): (string | null)[][] {
-  return grid.map((row) => row.map((cell) => (cell && moduleIdOf(cell) ? cell : null)));
+  return grid.map((row) =>
+    row.map((cell) => {
+      const id = moduleIdOf(cell);
+      if (!cell || !id || isBossModule(id)) return null;
+      return cell;
+    }),
+  );
 }
 
 function readCurrency(raw: { currency?: unknown } | null): number {
@@ -43,7 +50,7 @@ function readCurrency(raw: { currency?: unknown } | null): number {
 function readUnlocked(raw: { unlocked?: unknown } | null): string[] {
   if (!raw || !Array.isArray(raw.unlocked)) return [];
   return raw.unlocked.filter(
-    (id): id is string => typeof id === "string" && Boolean(getModule(id) || getHull(id)),
+    (id): id is string => typeof id === "string" && Boolean(getModule(id) || getHull(id)) && !isBossModule(id) && !isBossHull(id),
   );
 }
 
@@ -64,7 +71,7 @@ interface RawSave {
 function readBots(raw: { botsBeaten?: unknown } | null): number {
   const value = raw && typeof raw.botsBeaten === "number" ? Math.floor(raw.botsBeaten) : 0;
   if (!Number.isFinite(value)) return 0;
-  return Math.max(0, Math.min(3, value));
+  return Math.max(0, Math.min(BOTS.length, value));
 }
 
 /**
@@ -184,7 +191,7 @@ export function saveGame(data: SaveData): void {
     unlocked: [...data.unlocked],
     hull,
     layouts,
-    botsBeaten: Math.max(0, Math.min(3, Math.floor(data.botsBeaten) || 0)),
+    botsBeaten: Math.max(0, Math.min(BOTS.length, Math.floor(data.botsBeaten) || 0)),
   };
   data.hull = hull;
   data.layouts = layouts;

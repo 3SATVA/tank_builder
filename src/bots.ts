@@ -7,6 +7,8 @@ export interface BotDef {
   blurb: string;
   /** Scrap paid for a win. */
   scrap: number;
+  /** Uses parts the player cannot buy, place, or upload. */
+  boss?: boolean;
   hull: string;
   grid: (string | null)[][];
   tuning: BotTuning;
@@ -71,7 +73,114 @@ export const BOTS: readonly BotDef[] = [
       ["tracks", "armor", "power", "armor", "tracks"],
     ],
   },
+  {
+    id: "swarm",
+    index: 3,
+    name: "Swarm",
+    blurb: "Two robot bays and a nose cannon. Closes in and fills the field with drones.",
+    scrap: 160,
+    hull: "standard",
+    tuning: { wobble: 0.08, lead: 0.85, reaction: 0.12, near: 180, far: 360, dodge: 180, aimSlack: 0.2, strafe: 0.85 },
+    grid: [
+      ["tracks", "cannon", "armor", "armor", "tracks"],
+      ["tracks", "engine", null, "engine", "tracks"],
+      ["armor", "armor", "armor", "armor", "armor"],
+      ["fuel", "power", "power", "power", "fuel"],
+      ["fuel", "power", "armor", "power", "fuel"],
+      ["robot-bay@5,0", "robot-bay@5,0", "armor", "robot-bay@5,3", "robot-bay@5,3"],
+      ["robot-bay@5,0", "robot-bay@5,0", "fuel", "robot-bay@5,3", "robot-bay@5,3"],
+    ],
+  },
+  {
+    id: "bulwark",
+    index: 4,
+    name: "Bulwark",
+    blurb: "Heavy plate and two shield bubbles. Slow, and happy to sit in your fire.",
+    scrap: 220,
+    hull: "standard",
+    tuning: { wobble: 0.05, lead: 0.95, reaction: 0.1, near: 200, far: 320, dodge: 240, aimSlack: 0.16, strafe: 0.35 },
+    grid: [
+      ["heavy-armor", "cannon", "heavy-armor", "cannon", "heavy-armor"],
+      ["tracks", "engine", "armor", "engine", "tracks"],
+      ["heavy-armor", "shield-gen@2,1", "shield-gen@2,1", "armor", "heavy-armor"],
+      ["fuel", "shield-gen@2,1", "shield-gen@2,1", "repair-bay", "fuel"],
+      ["fuel", "power", "power", "armor", "armor"],
+      ["shield-gen@5,0", "shield-gen@5,0", "power", "armor", "tracks"],
+      ["shield-gen@5,0", "shield-gen@5,0", "power", "fuel", "tracks"],
+    ],
+  },
+  {
+    id: "gaff",
+    index: 5,
+    name: "Gaff",
+    blurb: "Boss grapples and black plate. Reels you in and keeps shooting.",
+    scrap: 300,
+    boss: true,
+    hull: "standard",
+    tuning: { wobble: 0.04, lead: 1, reaction: 0.07, near: 140, far: 280, dodge: 180, aimSlack: 0.14, strafe: 0.9 },
+    grid: [
+      ["armor", "boss-grapple@0,1", "boss-armor", "armor", "armor"],
+      ["tracks", "boss-grapple@0,1", "engine", "engine", "tracks"],
+      ["armor", "cannon", "armor", "armor", "armor"],
+      ["fuel", "fuel", "reactor", "fuel", "fuel"],
+      ["tracks", "engine", "armor", "armor", "tracks"],
+      ["armor", "armor", "fuel", "armor", "armor"],
+      ["tracks", "boss-armor", "armor", "armor", "tracks"],
+    ],
+  },
+  {
+    id: "redoubt",
+    index: 6,
+    name: "Redoubt",
+    blurb: "Two mega cannons on a crawling fortress, fed by a reactor.",
+    scrap: 400,
+    boss: true,
+    hull: "standard",
+    tuning: { wobble: 0.03, lead: 1.1, reaction: 0.05, near: 340, far: 520, dodge: 300, aimSlack: 0.1, strafe: 0.7 },
+    grid: [
+      ["mega-cannon@0,0", "boss-armor", "boss-armor", "boss-armor", "boss-armor"],
+      ["mega-cannon@0,0", "tracks", "engine", "engine", "tracks"],
+      ["mega-cannon@0,0", "boss-armor", "mega-cannon@2,2", "armor", "boss-armor"],
+      ["fuel", "fuel", "mega-cannon@2,2", "reactor", "fuel"],
+      ["tracks", "boss-armor", "mega-cannon@2,2", "power", "tracks"],
+      ["boss-armor", "power", "armor", "fuel", "boss-armor"],
+      ["tracks", "boss-armor", "fuel", "boss-armor", "tracks"],
+    ],
+  },
+  {
+    id: "ash-tyrant",
+    index: 7,
+    name: "Ash Tyrant",
+    blurb: "A citadel hull, two turrets, two mega cannons, and a double bubble.",
+    scrap: 520,
+    boss: true,
+    hull: "citadel",
+    tuning: { wobble: 0.02, lead: 1.15, reaction: 0.04, near: 280, far: 460, dodge: 320, aimSlack: 0.08, strafe: 1 },
+    grid: [
+      ["armor", "tracks", "armor", "armor", "armor", "tracks", "armor"],
+      ["tracks", "engine", "armor", "mega-cannon@1,3", "fuel", "engine", "tracks"],
+      ["boss-armor", "fuel", "armor", "mega-cannon@1,3", "armor", "fuel", "boss-armor"],
+      ["tracks", "fuel", "armor", "mega-cannon@1,3", "armor", "fuel", "tracks"],
+      ["super-shield@4,0", "super-shield@4,0", "armor", "reactor", "armor", "fuel", "armor"],
+      ["super-shield@4,0", "super-shield@4,0", "armor", "mega-cannon@5,3", "armor", "fuel", "tracks"],
+      ["tracks", "engine", "fuel", "mega-cannon@5,3", "fuel", "engine", "tracks"],
+      ["boss-armor", "fuel", "armor", "mega-cannon@5,3", "armor", "fuel", "boss-armor"],
+      ["tracks", "armor", "tracks", "reactor", "tracks", "armor", "tracks"],
+    ],
+  },
 ];
+
+/** A sharp pilot used by balance sims. Not a campaign rival. */
+export const ACE_TUNING: BotTuning = {
+  wobble: 0.03,
+  lead: 1,
+  reaction: 0.05,
+  near: 240,
+  far: 420,
+  dodge: 260,
+  aimSlack: 0.12,
+  strafe: 0.85,
+};
 
 const BY_ID = new Map(BOTS.map((bot) => [bot.id, bot]));
 

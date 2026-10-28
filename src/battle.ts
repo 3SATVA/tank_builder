@@ -18,7 +18,9 @@ import {
   isTurretCell,
   moduleIdOf,
   partRole,
+  turretAt,
   turretOrigin,
+  turretOrigins,
   TURRET_SIZE,
   type PartRole,
 } from "./modules";
@@ -164,6 +166,8 @@ export interface BattleOptions {
   /** Extra line after the fight, such as a rating change. */
   onSettle?: (won: boolean) => Promise<string | null>;
   rivalsLabel?: string;
+  /** When set, this bot drives the player. Used by headless balance runs. */
+  driver?: BotTuning;
 }
 
 interface TankDebug {
@@ -203,6 +207,7 @@ interface TankDebug {
 declare global {
   interface Window {
     __TANK_DEBUG__?: () => TankDebug;
+    __TANK_SKIP__?: (seconds: number) => TankDebug | undefined;
   }
 }
 
@@ -282,6 +287,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   const context = ctx;
   let pen: CanvasRenderingContext2D = context;
   const input = attachInput(moveStick.base, moveStick.knob, aimStick.base, aimStick.knob);
+  const playerAi = options.driver ? createBotController(options.driver) : null;
   const rivalAi = createBotController(options.rivalTuning);
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -337,7 +343,15 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   }
 
   function update(dt: number): void {
-    const playerCmd = commandsFromPlayer(input, player);
+    const playerCmd = playerAi
+      ? playerAi.commands({
+          self: player,
+          foe: rival,
+          arena: map,
+          incoming: shots.filter((shot) => shot.owner !== "player").map(shotView),
+          dt,
+        })
+      : commandsFromPlayer(input, player);
     const rivalCmd = rivalAi.commands({
       self: rival,
       foe: player,
@@ -462,7 +476,8 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     for (const gun of guns) {
       const angle = gun.mount === "turret" ? tank.turret : tank.angle;
       const reach = gun.hook ? 1.35 : gun.siege ? 2.35 : gun.heavy ? 1.7 : 0.95;
-      const muzzle = mountPoint(tank, gun.lx, gun.ly - CELL * reach, gun.mount === "turret");
+      const origin = gun.mount === "turret" ? turretAt(gun.row, gun.col, tank.hull) : null;
+      const muzzle = mountPoint(tank, gun.lx, gun.ly - CELL * reach, Boolean(origin), origin);
       const speed = gun.hook ? 460 : gun.siege ? 470 : 540;
       shots.push({
         x: muzzle.x,
@@ -510,7 +525,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
         const turret = isTurretCell(r, c, cols, rows, tank.hull);
         if (!tank.grid[r][c] || !shotInCell(tank, shot, r, c)) continue;
         const center = cellCenter(c, r, cols, rows);
-        const world = mountPoint(tank, center.x, center.y, turret);
+        const world = mountPoint(tank, center.x, center.y, turret, turret ? turretAt(r, c, tank.hull) : null);
         const dist = Math.hypot(shot.x - world.x, shot.y - world.y);
         if (!best || dist < best.d) best = { r, c, d: dist, turret };
       }
@@ -541,7 +556,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     const rows = tank.grid.length;
     const center = cellCenter(col, row, cols, rows);
     const onTurret = isTurretCell(row, col, cols, rows, tank.hull);
-    const world = mountPoint(tank, center.x, center.y, onTurret);
+    const world = mountPoint(tank, center.x, center.y, onTurret, onTurret ? turretAt(row, col, tank.hull) : null);
     burst(world.x, world.y, mod?.color ?? "#f6f1e6", 10);
     floaters.push({ x: world.x, y: world.y, text: mod ? `${mod.name} lost` : "Lost", life: 0.8 });
     if (tank.id === "player") {
@@ -867,36 +882,36 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     pen.lineTo(-10, -bodyH / 2 + 2);
     pen.closePath();
     pen.fill();
-    drawSmoothCells(tank, false);
+    drawSmoothCells(tank, null);
     pen.restore();
 
-    const origin = turretOrigin(tank.hull);
-    if (!origin) return;
-    const pivot = turretPivot(cols, rows, tank.hull);
-    if (!pivot) return;
-    const pivoted = localToWorld(pivot.x, pivot.y, tank.angle);
-    pen.save();
-    pen.translate(tank.x + pivoted.x, tank.y + pivoted.y);
-    pen.rotate(tank.turret);
-    pen.translate(-pivot.x, -pivot.y);
-    drawSmoothCells(tank, true);
-    const top = cellCenter(origin.c, origin.r, cols, rows);
-    pen.strokeStyle = "#ffb703";
-    pen.lineWidth = 3;
-    traceRoundRect(pen, top.x - CELL / 2 - 2, top.y - CELL / 2 - 2, TURRET_SIZE * CELL + 4, TURRET_SIZE * CELL + 4, 8);
-    pen.stroke();
-    pen.restore();
+    for (const origin of turretOrigins(tank.hull)) {
+      const pivot = cellCenter(origin.c + 1, origin.r + 1, cols, rows);
+      const pivoted = localToWorld(pivot.x, pivot.y, tank.angle);
+      pen.save();
+      pen.translate(tank.x + pivoted.x, tank.y + pivoted.y);
+      pen.rotate(tank.turret);
+      pen.translate(-pivot.x, -pivot.y);
+      drawSmoothCells(tank, origin);
+      const top = cellCenter(origin.c, origin.r, cols, rows);
+      pen.strokeStyle = "#ffb703";
+      pen.lineWidth = 3;
+      traceRoundRect(pen, top.x - CELL / 2 - 2, top.y - CELL / 2 - 2, TURRET_SIZE * CELL + 4, TURRET_SIZE * CELL + 4, 8);
+      pen.stroke();
+      pen.restore();
+    }
 
   }
 
-  function drawSmoothCells(tank: Tank, turretLayer: boolean): void {
+  function drawSmoothCells(tank: Tank, origin: { r: number; c: number } | null): void {
     const cols = tank.grid[0]?.length ?? 1;
     const rows = tank.grid.length;
     const plan = powerPlan(tank.grid);
     for (let r = 0; r < rows; r += 1) {
       for (let c = 0; c < cols; c += 1) {
-        const turret = isTurretCell(r, c, cols, rows, tank.hull);
-        if (turret !== turretLayer) continue;
+        const here = turretAt(r, c, tank.hull);
+        const onThis = origin ? here?.r === origin.r && here?.c === origin.c : !here;
+        if (!onThis) continue;
         const id = tank.grid[r][c];
         const center = cellCenter(c, r, cols, rows);
         const size = CELL - 3;
@@ -922,7 +937,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
         if (mod.kind === "weapon") {
           if (mod.hook) drawSmoothHarpoon(center.x, center.y, size, role, tank.muzzle > 0 && role === "front");
           else if (mod.cutter) drawSmoothCutter(center.x, center.y, size);
-          else if (mod.id === "heavy-cannon") drawSmoothHeavy(center.x, center.y, size, role, tank.muzzle > 0 && role === "front");
+          else if (mod.id === "heavy-cannon" || mod.id === "mega-cannon") drawSmoothHeavy(center.x, center.y, size, role, tank.muzzle > 0 && role === "front");
           else if (mod.id === "medium-cannon" && role === "rear") drawSmoothBreech(center.x, center.y, size);
           else drawSmoothCannon(center.x, center.y, size, tank.muzzle > 0, (mod.rows ?? 1) > 1);
         } else if (mod.drone) drawSmoothBay(center.x, center.y, size, role);
@@ -937,6 +952,11 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
         }
         if (tank.sparkLife > 0 && tank.sparkCells.some((cell) => cell.r === r && cell.c === c)) {
           drawSmoothSpark(center.x, center.y, size, tank.sparkLife);
+        }
+        if (mod.boss && !unpowered) {
+          pen.strokeStyle = "#ff3048";
+          pen.lineWidth = 2.5;
+          pen.strokeRect(x + 1.5, y + 1.5, size - 3, size - 3);
         }
         if (unpowered) {
           pen.globalAlpha = 1;
@@ -1420,31 +1440,30 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       ctx.fillRect(pad - 2, pad, 2, gridH);
       ctx.fillRect(pad + gridW, pad, 2, gridH);
       drawNosePixels(ctx, pad, gridW);
-      blitCells(ctx, tank, false, pad, cell);
+      blitCells(ctx, tank, null, pad, cell);
     });
     const at = worldToArt(tank.x, tank.y, view);
     blitRotated(hullSprite.canvas, at.x, at.y, tank.angle - camAngle, pad + gridW / 2, pad + gridH / 2);
 
-    const origin = turretOrigin(tank.hull);
-    if (!origin) return;
-    const pivotX = pad + (origin.c + 1) * cell + cell / 2;
-    const pivotY = pad + (origin.r + 1) * cell + cell / 2;
-    paintLayer(turretSprite, gridW + pad * 2, gridH + pad * 2, () => {
-      blitCells(turretSprite.ctx, tank, true, pad, cell);
-      const ctx = turretSprite.ctx;
-      const x = pad + origin.c * cell;
-      const y = pad + origin.r * cell;
-      ctx.fillStyle = PAL.amber;
-      ctx.fillRect(x, y, cell * 3, 2);
-      ctx.fillRect(x, y + cell * 3 - 2, cell * 3, 2);
-      ctx.fillRect(x, y, 2, cell * 3);
-      ctx.fillRect(x + cell * 3 - 2, y, 2, cell * 3);
-    });
-    const pivot = turretPivot(cols, rows, tank.hull);
-    if (!pivot) return;
-    const spun = localToWorld(pivot.x, pivot.y, tank.angle);
-    const tip = worldToArt(tank.x + spun.x, tank.y + spun.y, view);
-    blitRotated(turretSprite.canvas, tip.x, tip.y, tank.turret - camAngle, pivotX, pivotY);
+    for (const origin of turretOrigins(tank.hull)) {
+      const pivotX = pad + (origin.c + 1) * cell + cell / 2;
+      const pivotY = pad + (origin.r + 1) * cell + cell / 2;
+      paintLayer(turretSprite, gridW + pad * 2, gridH + pad * 2, () => {
+        blitCells(turretSprite.ctx, tank, origin, pad, cell);
+        const ctx = turretSprite.ctx;
+        const x = pad + origin.c * cell;
+        const y = pad + origin.r * cell;
+        ctx.fillStyle = PAL.amber;
+        ctx.fillRect(x, y, cell * 3, 2);
+        ctx.fillRect(x, y + cell * 3 - 2, cell * 3, 2);
+        ctx.fillRect(x, y, 2, cell * 3);
+        ctx.fillRect(x + cell * 3 - 2, y, 2, cell * 3);
+      });
+      const pivot = cellCenter(origin.c + 1, origin.r + 1, cols, rows);
+      const spun = localToWorld(pivot.x, pivot.y, tank.angle);
+      const tip = worldToArt(tank.x + spun.x, tank.y + spun.y, view);
+      blitRotated(turretSprite.canvas, tip.x, tip.y, tank.turret - camAngle, pivotX, pivotY);
+    }
   }
 
   function drawNosePixels(ctx: CanvasRenderingContext2D, pad: number, gridW: number): void {
@@ -1457,21 +1476,29 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     ctx.fillRect(cx - 2, y, 4, 2);
   }
 
-  function blitCells(ctx: CanvasRenderingContext2D, tank: Tank, turretLayer: boolean, pad: number, cell: number): void {
+  function blitCells(
+    ctx: CanvasRenderingContext2D,
+    tank: Tank,
+    origin: { r: number; c: number } | null,
+    pad: number,
+    cell: number,
+  ): void {
     const cols = tank.grid[0]?.length ?? 1;
     const rows = tank.grid.length;
     const moving = Math.hypot(tank.vx, tank.vy) > 18;
     const plan = powerPlan(tank.grid);
     for (let r = 0; r < rows; r += 1) {
       for (let c = 0; c < cols; c += 1) {
-        if (isTurretCell(r, c, cols, rows, tank.hull) !== turretLayer) continue;
+        const here = turretAt(r, c, tank.hull);
+        const onThis = origin ? here?.r === origin.r && here?.c === origin.c : !here;
+        if (!onThis) continue;
         const token = tank.grid[r][c];
         const id = moduleIdOf(token);
         const anchor = isAnchorCell(token, r, c);
         const role = partRole(token, r, c);
         const quad = role === "ne" ? 1 : role === "sw" ? 2 : role === "se" ? 3 : 0;
         const art = moduleArt(id ?? "", {
-          flash: Boolean(id && (id === "cannon" || id === "medium-cannon" || id === "heavy-cannon" || id === "harpoon") && anchor && tank.muzzle > 0),
+          flash: Boolean(id && (id === "cannon" || id === "medium-cannon" || id === "heavy-cannon" || id === "mega-cannon" || id === "harpoon" || id === "boss-grapple") && anchor && tank.muzzle > 0),
           puff: id === "engine" && moving && Math.floor(simTime * 8) % 2 === 0,
           rear: role === "rear",
           mid: role === "mid",
@@ -1707,6 +1734,12 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   window.addEventListener("keydown", onKey);
 
   if (import.meta.env.DEV) {
+    window.__TANK_SKIP__ = (seconds: number) => {
+      const step = 1 / 60;
+      const ticks = Math.max(0, Math.ceil(seconds / step));
+      for (let i = 0; i < ticks && phase === "play"; i += 1) update(step);
+      return window.__TANK_DEBUG__?.();
+    };
     window.__TANK_DEBUG__ = () => ({
       x: player.x,
       y: player.y,
@@ -1769,7 +1802,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       for (let c = 0; c < cols; c += 1) {
         if (!isTurretCell(r, c, cols, rows, tank.hull)) continue;
         const center = cellCenter(c, r, cols, rows);
-        const world = mountPoint(tank, center.x, center.y, true);
+        const world = mountPoint(tank, center.x, center.y, true, turretAt(r, c, tank.hull));
         boxes.push({ x: world.x, y: world.y, halfW: CELL * 0.46, halfH: CELL * 0.46, angle: tank.turret });
       }
     }
@@ -1781,7 +1814,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     const rows = tank.grid.length;
     const turret = isTurretCell(row, col, cols, rows, tank.hull);
     const center = cellCenter(col, row, cols, rows);
-    const world = mountPoint(tank, center.x, center.y, turret);
+    const world = mountPoint(tank, center.x, center.y, turret, turret ? turretAt(row, col, tank.hull) : null);
     return { x: world.x, y: world.y, halfW: CELL * 0.5, halfH: CELL * 0.5, angle: turret ? tank.turret : tank.angle };
   }
 
@@ -1864,7 +1897,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
         if (seen.has(key)) continue;
         const turret = isTurretCell(r, c, cols, rows, tank.hull);
         const center = cellCenter(c, r, cols, rows);
-        const world = mountPoint(tank, center.x, center.y, turret);
+        const world = mountPoint(tank, center.x, center.y, turret, turret ? turretAt(r, c, tank.hull) : null);
         if (!hitsHazard(map, world.x, world.y, CELL * 0.32)) continue;
         seen.add(key);
         const left = absorb(tank, LAVA_DPS * dt);
@@ -1943,7 +1976,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
         if (!isAnchorCell(tank.grid[r][c], r, c) || !cellModule(tank.grid[r][c])?.hook) continue;
         const turret = isTurretCell(r, c, cols, rows, tank.hull);
         const center = cellCenter(c, r, cols, rows);
-        return mountPoint(tank, center.x, center.y - CELL * 1.35, turret);
+        return mountPoint(tank, center.x, center.y - CELL * 1.35, turret, turret ? turretAt(r, c, tank.hull) : null);
       }
     }
     return null;
@@ -1999,7 +2032,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
         const angle = onTurret ? tank.turret : tank.angle;
         const rear = localToWorld(0, 1, angle);
         for (let n = 0; n < 2; n += 1) {
-          const mouth = mountPoint(tank, center.x + (n === 0 ? -4 : 4), center.y + CELL * 0.82, onTurret);
+          const mouth = mountPoint(tank, center.x + (n === 0 ? -4 : 4), center.y + CELL * 0.82, onTurret, onTurret ? turretAt(r, c, tank.hull) : null);
           const speed = 22 + Math.random() * 20;
           particles.push({
             x: mouth.x,
@@ -2042,13 +2075,13 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   }
 
   function stepShield(tank: Tank, dt: number): void {
-    const gens = poweredCount(tank, (mod) => Boolean(mod.generator));
-    tank.shieldMax = gens * SHIELD_HP;
+    const pool = shieldPool(tank.grid);
+    tank.shieldMax = pool.hp;
     if (tank.shield > tank.shieldMax) tank.shield = tank.shieldMax;
     if (tank.shieldMax <= 0) return;
     if (tank.shieldDelay > 0) tank.shieldDelay = Math.max(0, tank.shieldDelay - dt);
     else if (tank.shield < tank.shieldMax) {
-      tank.shield = Math.min(tank.shieldMax, tank.shield + SHIELD_REGEN * gens * dt);
+      tank.shield = Math.min(tank.shieldMax, tank.shield + SHIELD_REGEN * pool.count * dt);
     }
   }
 
@@ -2298,15 +2331,16 @@ function spawnTank(
     plate: grid.map((row) => row.map((cell) => (cell ? blockPlate(cell) : 0))),
     blueprint: cloneGrid(blueprint),
     radius: Math.max(cols, rows) * CELL * 0.34,
-    shield: shieldGenerators(grid) * SHIELD_HP,
-    shieldMax: shieldGenerators(grid) * SHIELD_HP,
+    shield: shieldPool(grid).hp,
+    shieldMax: shieldPool(grid).hp,
     shieldDelay: 0,
     launch: launchClocks(grid),
   };
 }
 
-function shieldGenerators(grid: (string | null)[][]): number {
+function shieldPool(grid: (string | null)[][]): { hp: number; count: number } {
   const plan = powerPlan(grid);
+  let hp = 0;
   let count = 0;
   grid.forEach((row, r) => {
     row.forEach((token, c) => {
@@ -2314,10 +2348,11 @@ function shieldGenerators(grid: (string | null)[][]): number {
       const mod = cellModule(token);
       if (!mod?.generator) return;
       if ((mod.stats.powerUse ?? 0) > 0 && !plan.powered.has(`${r},${c}`)) return;
+      hp += mod.shieldHp ?? SHIELD_HP;
       count += 1;
     });
   });
-  return count;
+  return { hp, count };
 }
 
 function launchClocks(grid: (string | null)[][]): Record<string, number> {
@@ -2380,14 +2415,22 @@ function turretPivot(cols: number, rows: number, hull: string): { x: number; y: 
 }
 
 /** World position of a hull-local point. Turret points spin around the 3×3, which stays bolted to the hull. */
-function mountPoint(tank: Tank, lx: number, ly: number, onTurret: boolean): { x: number; y: number } {
+function mountPoint(
+  tank: Tank,
+  lx: number,
+  ly: number,
+  onTurret: boolean,
+  origin: { r: number; c: number } | null = null,
+): { x: number; y: number } {
   if (!onTurret) {
     const p = localToWorld(lx, ly, tank.angle);
     return { x: tank.x + p.x, y: tank.y + p.y };
   }
   const cols = tank.grid[0]?.length ?? 1;
   const rows = tank.grid.length;
-  const pivot = turretPivot(cols, rows, tank.hull) ?? { x: 0, y: 0 };
+  const pivot = origin
+    ? cellCenter(origin.c + 1, origin.r + 1, cols, rows)
+    : (turretPivot(cols, rows, tank.hull) ?? { x: 0, y: 0 });
   const base = localToWorld(pivot.x, pivot.y, tank.angle);
   const spun = localToWorld(lx - pivot.x, ly - pivot.y, tank.turret);
   return { x: tank.x + base.x + spun.x, y: tank.y + base.y + spun.y };
@@ -2398,7 +2441,7 @@ function shotInCell(tank: Tank, shot: Shot, row: number, col: number): boolean {
   const rows = tank.grid.length;
   const onTurret = isTurretCell(row, col, cols, rows, tank.hull);
   const center = cellCenter(col, row, cols, rows);
-  const world = mountPoint(tank, center.x, center.y, onTurret);
+  const world = mountPoint(tank, center.x, center.y, onTurret, onTurret ? turretAt(row, col, tank.hull) : null);
   const local = worldToLocal(shot.x - world.x, shot.y - world.y, onTurret ? tank.turret : tank.angle);
   const half = CELL * 0.46 + shot.r;
   return Math.abs(local.x) <= half && Math.abs(local.y) <= half;

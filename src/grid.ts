@@ -1,4 +1,4 @@
-import { blockPlate, getModule, isTurretCell, moduleIdOf } from "./modules";
+import { blockPlate, getModule, isBossModule, isTurretCell, moduleIdOf } from "./modules";
 
 export type Grid = (string | null)[][];
 
@@ -47,7 +47,7 @@ export function canPlace(grid: Grid, hull: string, moduleId: string, row: number
  * Overlapping an existing multi-cell part removes that whole part first.
  */
 export function commitPlacement(grid: Grid, hull: string, moduleId: string, row: number, col: number): boolean {
-  if (!getModule(moduleId)) return false;
+  if (!getModule(moduleId) || isBossModule(moduleId)) return false;
   const current = moduleIdOf(grid[row]?.[col] ?? null);
   if (current === moduleId) {
     removeInstance(grid, row, col);

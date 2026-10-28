@@ -461,15 +461,20 @@ export function renderCampaign(save: SaveData, go: (screen: ScreenId, botId?: st
     card.dataset.bot = bot.id;
     if (!open) card.dataset.locked = "true";
     if (cleared) card.dataset.cleared = "true";
+    if (bot.boss) card.classList.add("boss");
     const top = el("div", "bot-card-top");
-    top.append(el("h3", undefined, bot.name), el("span", "bot-reward", `${bot.scrap} scrap`));
+    const title = el("div", "bot-title");
+    title.append(el("h3", undefined, bot.name));
+    if (bot.boss) title.append(el("span", "boss-tag", "Boss"));
+    top.append(title, el("span", "bot-reward", `${bot.scrap} scrap`));
     const foot = el("div", "bot-foot");
     const state = el("div", "bot-state");
     if (!open) {
       const lock = el("span", "lock-icon");
       lock.innerHTML =
         '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
-      state.append(lock, el("span", undefined, bot.index === 1 ? "Beat Rookie" : "Beat Veteran"));
+      const previous = BOTS[bot.index - 1];
+      state.append(lock, el("span", undefined, previous ? `Beat ${previous.name}` : "Locked"));
     } else if (cleared) {
       state.append(el("span", undefined, "Cleared"));
     } else {

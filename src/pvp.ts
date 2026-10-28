@@ -6,6 +6,8 @@ import {
   getHull,
   getModule,
   hullSize,
+  isBossHull,
+  isBossModule,
   moduleIdOf,
   outfitProblem,
 } from "./modules";
@@ -161,7 +163,7 @@ function clearToken(grid: (string | null)[][], token: string): void {
 
 /** Drop unknown parts and anything that doesn't fit the hull. Returns null when it can't fight. */
 export function readOpponentLayout(hullRaw: unknown, layoutRaw: unknown): { hull: string; grid: (string | null)[][] } | null {
-  const hull = typeof hullRaw === "string" && getHull(hullRaw) ? hullRaw : "standard";
+  const hull = typeof hullRaw === "string" && getHull(hullRaw) && !isBossHull(hullRaw) ? hullRaw : "standard";
   const size = hullSize(hull);
   let cells: unknown = layoutRaw;
   const wrapped = asRecord(layoutRaw);
@@ -177,7 +179,7 @@ export function readOpponentLayout(hullRaw: unknown, layoutRaw: unknown): { hull
       const value = row[c];
       if (typeof value !== "string") continue;
       const id = value.split("@")[0] ?? "";
-      if (!getModule(id)) continue;
+      if (!getModule(id) || isBossModule(id)) continue;
       if (!value.includes("@")) {
         grid[r][c] = id;
         continue;
@@ -227,13 +229,14 @@ export async function publishDefense(hull: string, grid: ReadonlyArray<ReadonlyA
   if (!identity) throw new Error("Choose a callsign under PvP first.");
   const problem = outfitProblem(grid);
   if (problem) throw new Error(problem);
+  const posted = grid.map((row) => row.map((cell) => (isBossModule(moduleIdOf(cell)) ? null : cell)));
   const { error } = await supabase.rpc("tank_save_build", {
     p_player: identity.playerId,
     p_token: identity.token,
     p_name: identity.name,
-    p_hull: hull,
-    p_layout: packLayout(grid),
-    p_score: anchorCount(grid),
+    p_hull: isBossHull(hull) ? "standard" : hull,
+    p_layout: packLayout(posted),
+    p_score: anchorCount(posted),
   });
   if (error) throw new Error(friendly(error));
   return "Defense tank is posted.";

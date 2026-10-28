@@ -24,6 +24,11 @@ const BY_ID: Record<string, string> = {
     '<path d="M12 2.2 8.2 7.2h2.2V14H13.6V7.2H15.8L12 2.2z"/><path d="M7 15.2h10v4.2H7z"/><path d="M9.2 15.2V11h5.6v4.2"/>',
   cutter:
     '<circle cx="12" cy="12" r="6.2"/><path d="M12 4.2v2.4M12 17.4v2.4M4.2 12h2.4M17.4 12h2.4M6.4 6.4l1.7 1.7M15.9 15.9l1.7 1.7M17.6 6.4l-1.7 1.7M8.1 15.9l-1.7 1.7"/><circle cx="12" cy="12" r="1.6"/>',
+  "boss-armor": '<path d="M5 4h14v8c0 4-3 6.8-7 8.6C8 18.8 5 16 5 12V4z"/><path d="M8 8h8M8 12h8"/>',
+  reactor: '<path d="M13 3.5 6.5 13H12l-1 7.5L18 11h-5.5L13 3.5z"/><circle cx="12" cy="12" r="2.2"/>',
+  "mega-cannon": '<path d="M6 16h12v5H6z"/><path d="M8.2 16V1.6h7.6V16"/><path d="M6 1.4h12v2.4H6z"/>',
+  "boss-grapple": '<path d="M12 2 7.4 8h3V14h3V8h3L12 2z"/><path d="M7 15h10v5H7z"/>',
+  "super-shield": '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.2"/>',
 };
 
 export function iconSvg(kind: ModuleKind, id?: string): string {

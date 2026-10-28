@@ -160,6 +160,72 @@ export const MODULES: readonly ModuleDef[] = [
     plate: 48,
     generator: true,
   },
+  {
+    id: "boss-armor",
+    kind: "armor",
+    name: "Boss Armor",
+    starter: false,
+    boss: true,
+    color: "#1a0c10",
+    blurb: "boss plate",
+    stats: { speed: -12, turn: -4 },
+    plate: 120,
+  },
+  {
+    id: "reactor",
+    kind: "power",
+    name: "Reactor",
+    starter: false,
+    boss: true,
+    color: "#ff2438",
+    blurb: "boss power",
+    stats: { power: 12 },
+    plate: 80,
+  },
+  {
+    id: "mega-cannon",
+    kind: "weapon",
+    name: "Mega Cannon",
+    starter: false,
+    boss: true,
+    color: "#8a1020",
+    blurb: "boss gun",
+    stats: { damage: 48, fireRate: 0.15, powerUse: 9 },
+    rows: 3,
+    cols: 1,
+    plate: 52,
+    shotLife: 3,
+  },
+  {
+    id: "boss-grapple",
+    kind: "weapon",
+    name: "Boss Grapple",
+    starter: false,
+    boss: true,
+    color: "#c81830",
+    blurb: "boss harpoon",
+    stats: { damage: 26, fireRate: 0.24, powerUse: 4 },
+    rows: 2,
+    cols: 1,
+    plate: 56,
+    shotLife: 1.55,
+    hook: true,
+  },
+  {
+    id: "super-shield",
+    kind: "power",
+    name: "Super Shield",
+    starter: false,
+    boss: true,
+    color: "#3a1020",
+    blurb: "boss bubble",
+    stats: { powerUse: 6 },
+    rows: 2,
+    cols: 2,
+    plate: 70,
+    generator: true,
+    shieldHp: 100,
+  },
 ];
 
 /**
@@ -253,7 +319,7 @@ export function getModule(id: string): ModuleDef | undefined {
 
 export function modulesFor(unlocked: readonly string[]): ModuleDef[] {
   const owned = new Set(unlocked);
-  return MODULES.filter((mod) => mod.starter || owned.has(mod.id));
+  return MODULES.filter((mod) => !mod.boss && (mod.starter || owned.has(mod.id)));
 }
 
 /** Bare hull before any blocks. Armor soaks hits on its own cell and does not add a separate pool. */
@@ -282,6 +348,10 @@ export interface HullDef {
   mark: string;
   /** Top-left cell of the 3×3 turret. Null when every gun is mounted on the hull. */
   turret: { r: number; c: number } | null;
+  /** More 3×3 turrets that aim with the main one. */
+  extraTurrets?: { r: number; c: number }[];
+  /** Campaign only. Hidden from the shop and the garage, and rejected by PvP. */
+  boss?: boolean;
 }
 
 export const HULLS: readonly HullDef[] = [
@@ -315,6 +385,18 @@ export const HULLS: readonly HullDef[] = [
     mark: "Deck",
     turret: null,
   },
+  {
+    id: "citadel",
+    name: "Citadel",
+    blurb: "Boss hull. Two turrets.",
+    starter: false,
+    boss: true,
+    cols: 7,
+    rows: 9,
+    mark: "Boss",
+    turret: { r: 1, c: 2 },
+    extraTurrets: [{ r: 5, c: 2 }],
+  },
 ];
 
 const HULL_BY_ID = new Map(HULLS.map((hull) => [hull.id, hull]));
@@ -325,7 +407,31 @@ export function getHull(id: string): HullDef | undefined {
 
 export function hullsFor(unlocked: readonly string[]): HullDef[] {
   const owned = new Set(unlocked);
-  return HULLS.filter((hull) => hull.starter || owned.has(hull.id));
+  return HULLS.filter((hull) => !hull.boss && (hull.starter || owned.has(hull.id)));
+}
+
+export function isBossModule(id: string | null | undefined): boolean {
+  return Boolean(id && getModule(id)?.boss);
+}
+
+export function isBossHull(id: string | null | undefined): boolean {
+  return Boolean(id && getHull(id)?.boss);
+}
+
+/** Every 3×3 on this hull, main turret first. */
+export function turretOrigins(hull = "standard"): { r: number; c: number }[] {
+  const spec = getHull(hull);
+  if (!spec?.turret) return [];
+  return [spec.turret, ...(spec.extraTurrets ?? [])];
+}
+
+/** The 3×3 that contains this cell, if it sits on a turret. */
+export function turretAt(row: number, col: number, hull = "standard"): { r: number; c: number } | null {
+  return (
+    turretOrigins(hull).find(
+      (origin) => col >= origin.c && col < origin.c + TURRET_SIZE && row >= origin.r && row < origin.r + TURRET_SIZE,
+    ) ?? null
+  );
 }
 
 export function hullSize(hull = "standard"): { cols: number; rows: number } {
@@ -344,15 +450,8 @@ export function turretOrigin(hull = "standard"): { c: number; r: number } | null
   return spec.turret;
 }
 
-export function isTurretCell(row: number, col: number, cols = GRID_COLS, rows = GRID_ROWS, hull = "standard"): boolean {
-  const spec = getHull(hull);
-  const origin = spec
-    ? spec.turret
-    : cols === GRID_COLS && rows === GRID_ROWS
-      ? HULLS[0].turret
-      : { c: Math.floor((cols - TURRET_SIZE) / 2), r: Math.floor((rows - TURRET_SIZE) / 2) };
-  if (!origin) return false;
-  return col >= origin.c && col < origin.c + TURRET_SIZE && row >= origin.r && row < origin.r + TURRET_SIZE;
+export function isTurretCell(row: number, col: number, _cols = GRID_COLS, _rows = GRID_ROWS, hull = "standard"): boolean {
+  return turretAt(row, col, hull) !== null;
 }
 
 export type PartRole = "single" | "front" | "mid" | "rear" | "nw" | "ne" | "sw" | "se";
