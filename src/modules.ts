@@ -96,13 +96,86 @@ export const MODULES: readonly ModuleDef[] = [
     stats: { speed: -30, turn: -12 },
     plate: 96,
   },
+  {
+    id: "heavy-cannon",
+    kind: "weapon",
+    name: "Heavy Cannon",
+    starter: false,
+    color: PAL.sand,
+    blurb: "46 dmg · uses 8",
+    stats: { damage: 46, fireRate: 0.16, powerUse: 8 },
+    rows: 3,
+    cols: 1,
+    plate: 64,
+    shotLife: 2.9,
+  },
+  {
+    id: "robot-bay",
+    kind: "power",
+    name: "Robot Bay",
+    starter: false,
+    color: PAL.gray,
+    blurb: "launches a drone · uses 3",
+    stats: { powerUse: 3 },
+    rows: 2,
+    cols: 2,
+    plate: 48,
+    drone: true,
+  },
+  {
+    id: "shield-gen",
+    kind: "power",
+    name: "Shield Generator",
+    starter: false,
+    color: PAL.blue,
+    blurb: "bubble · stacks · uses 3",
+    stats: { powerUse: 3 },
+    rows: 2,
+    cols: 2,
+    plate: 48,
+    generator: true,
+  },
 ];
+
+/**
+ * Scrap price for the newest shop batch: Heavy Cannon, Robot Bay, Gun Deck,
+ * and Shield Generator. Change this one number to reprice all four.
+ */
+export const NEW_SHOP_COST = 50;
 
 /**
  * A few wins (50 scrap each) buy the first block. The hull costs a bit more.
  * Heavy armor is the cheapest so it is the first thing a new pilot can afford.
  */
 export const SHOP_ITEMS: readonly ShopItem[] = [
+  {
+    kind: "module",
+    moduleId: "heavy-cannon",
+    cost: NEW_SHOP_COST,
+    name: "Heavy Cannon",
+    tagline: "Three cells in a line, like a longer Medium Cannon. Bigger shell, longer range, slower fire, and a high power draw. All three cells sit on the hull, or all three sit in the turret.",
+  },
+  {
+    kind: "module",
+    moduleId: "robot-bay",
+    cost: NEW_SHOP_COST,
+    name: "Robot Bay",
+    tagline: "A 2×2 bay. In battle it launches one small drone that drives itself, steers around cover, and shoots the enemy. The rival can destroy it. Draws 3 power.",
+  },
+  {
+    kind: "hull",
+    hullId: "gun-deck",
+    cost: NEW_SHOP_COST,
+    name: "Gun Deck",
+    tagline: "No turret, and a wider, longer hull with more bays. Every gun is bolted to the hull and fires the way the hull faces. The aim stick still fires.",
+  },
+  {
+    kind: "module",
+    moduleId: "shield-gen",
+    cost: NEW_SHOP_COST,
+    name: "Shield Generator",
+    tagline: "A 2×2 generator. A bubble around the tank soaks hits before modules do, then recharges after a delay. Each extra generator adds shield and recharges faster. Draws 3 power.",
+  },
   {
     kind: "module",
     moduleId: "heavy-armor",
@@ -164,8 +237,14 @@ export interface HullDef {
   /** Shown under the hull switcher. */
   blurb: string;
   starter: boolean;
-  /** Top-left cell of this hull's 3×3 turret on a 5×7 grid. */
-  turret: { r: number; c: number };
+  cols: number;
+  rows: number;
+  /** Short label on the shop card. */
+  mark: string;
+  /** Top-left cell of the 3×3 turret. Null when every gun is mounted on the hull. */
+  turret: { r: number; c: number } | null;
+  /** Empty cell that takes a core hit. On turreted hulls this is the turret center. */
+  core: { r: number; c: number };
 }
 
 export const HULLS: readonly HullDef[] = [
@@ -174,14 +253,33 @@ export const HULLS: readonly HullDef[] = [
     name: "Standard",
     blurb: "Turret in the middle.",
     starter: true,
+    cols: GRID_COLS,
+    rows: GRID_ROWS,
+    mark: "Std",
     turret: { r: 2, c: 1 },
+    core: { r: 3, c: 2 },
   },
   {
     id: "rear",
     name: "Rear turret",
     blurb: "Turret toward the back. More hull in front.",
     starter: false,
+    cols: GRID_COLS,
+    rows: GRID_ROWS,
+    mark: "Rear",
     turret: { r: 4, c: 1 },
+    core: { r: 5, c: 2 },
+  },
+  {
+    id: "gun-deck",
+    name: "Gun deck",
+    blurb: "No turret. Wider and longer. Guns fire with the hull.",
+    starter: false,
+    cols: 7,
+    rows: 8,
+    mark: "Deck",
+    turret: null,
+    core: { r: 3, c: 3 },
   },
 ];
 
@@ -196,29 +294,69 @@ export function hullsFor(unlocked: readonly string[]): HullDef[] {
   return HULLS.filter((hull) => hull.starter || owned.has(hull.id));
 }
 
-/** Top-left cell of this hull's 3×3 turret. */
-export function turretOrigin(hull = "standard"): { c: number; r: number } {
-  return getHull(hull)?.turret ?? HULLS[0].turret;
+export function hullSize(hull = "standard"): { cols: number; rows: number } {
+  const spec = getHull(hull);
+  return { cols: spec?.cols ?? GRID_COLS, rows: spec?.rows ?? GRID_ROWS };
+}
+
+export function hasTurret(hull = "standard"): boolean {
+  return Boolean(getHull(hull)?.turret);
+}
+
+/** Top-left cell of this hull's 3×3 turret, or null when the hull has no turret. */
+export function turretOrigin(hull = "standard"): { c: number; r: number } | null {
+  const spec = getHull(hull);
+  if (!spec) return HULLS[0].turret;
+  return spec.turret;
 }
 
 export function isTurretCell(row: number, col: number, cols = GRID_COLS, rows = GRID_ROWS, hull = "standard"): boolean {
-  if (cols !== GRID_COLS || rows !== GRID_ROWS) {
-    const origin = {
-      c: Math.floor((cols - TURRET_SIZE) / 2),
-      r: Math.floor((rows - TURRET_SIZE) / 2),
-    };
-    return col >= origin.c && col < origin.c + TURRET_SIZE && row >= origin.r && row < origin.r + TURRET_SIZE;
-  }
-  const origin = turretOrigin(hull);
+  const spec = getHull(hull);
+  const origin = spec
+    ? spec.turret
+    : cols === GRID_COLS && rows === GRID_ROWS
+      ? HULLS[0].turret
+      : { c: Math.floor((cols - TURRET_SIZE) / 2), r: Math.floor((rows - TURRET_SIZE) / 2) };
+  if (!origin) return false;
   return col >= origin.c && col < origin.c + TURRET_SIZE && row >= origin.r && row < origin.r + TURRET_SIZE;
 }
 
-/** Center of the 3×3. A block here soaks first; an empty center takes core damage. */
+/** The heart of the hull. A block here soaks first; an empty heart takes core damage. */
 export function isCoreCell(row: number, col: number, cols = GRID_COLS, rows = GRID_ROWS, hull = "standard"): boolean {
+  const spec = getHull(hull);
+  if (spec) return row === spec.core.r && col === spec.core.c;
   const origin = cols === GRID_COLS && rows === GRID_ROWS
-    ? turretOrigin(hull)
+    ? HULLS[0].turret
     : { c: Math.floor((cols - TURRET_SIZE) / 2), r: Math.floor((rows - TURRET_SIZE) / 2) };
+  if (!origin) return false;
   return row === origin.r + 1 && col === origin.c + 1;
+}
+
+export type PartRole = "single" | "front" | "mid" | "rear" | "nw" | "ne" | "sw" | "se";
+
+/** Which piece of a multi-cell part this bay is. Front is the muzzle end. */
+export function partRole(token: string | null, row: number, col: number): PartRole {
+  const mod = getModule(moduleIdOf(token) ?? "");
+  if (!token || !mod) return "single";
+  const anchor = token.split("@")[1];
+  if (!anchor) return "single";
+  const [ar, ac] = anchor.split(",").map((part) => Number(part));
+  const dr = row - (ar ?? row);
+  const dc = col - (ac ?? col);
+  const rows = mod.rows ?? 1;
+  const spanCols = mod.cols ?? 1;
+  if (rows > 1 && spanCols === 1) {
+    if (dr <= 0) return "front";
+    if (dr >= rows - 1) return "rear";
+    return "mid";
+  }
+  if (rows > 1 && spanCols > 1) {
+    if (dr <= 0 && dc <= 0) return "nw";
+    if (dr <= 0) return "ne";
+    if (dc <= 0) return "sw";
+    return "se";
+  }
+  return "single";
 }
 
 export function moduleIdOf(value: string | null): string | null {
@@ -253,6 +391,18 @@ export function cloneGrid(grid: ReadonlyArray<ReadonlyArray<string | null>>): (s
  * Two cannons sit on the front of the hull; two sit on the turret. Two power cells feed the four cannons.
  */
 export function createDefaultGrid(hull = "standard"): (string | null)[][] {
+  if (hull === "gun-deck") {
+    return [
+      ["armor", "cannon", "armor", "cannon", "armor", "cannon", "armor"],
+      ["tracks", "engine", "armor", "armor", "armor", "engine", "tracks"],
+      ["armor", "fuel", "power", "armor", "power", "fuel", "armor"],
+      ["tracks", "armor", "fuel", "armor", "fuel", "armor", "tracks"],
+      ["armor", "power", "armor", "power", "armor", "power", "armor"],
+      ["tracks", "engine", "armor", "cannon", "armor", "engine", "tracks"],
+      ["armor", "cannon", "fuel", "armor", "fuel", "cannon", "armor"],
+      ["armor", "tracks", "armor", "armor", "armor", "tracks", "armor"],
+    ];
+  }
   if (hull === "rear") {
     return [
       ["armor", "cannon", "armor", "cannon", "armor"],

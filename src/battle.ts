@@ -7,18 +7,21 @@ import { readArtStyle } from "./config";
 import { angleDelta, clamp, localToWorld, rotateToward, traceRoundRect, worldToLocal } from "./math";
 import { hitsBlock, hitsHazard, pickMap, resolveTank, TILE, type ArenaMap, type MapBlock } from "./maps";
 import { PAL } from "./palette";
-import { CELL_ART, boomArt, moduleArt, nearestScale, obstacleArt, shotArt } from "./sprites";
+import { CELL_ART, boomArt, droneArt, moduleArt, nearestScale, obstacleArt, shotArt } from "./sprites";
 import {
   blockPlate,
   cloneGrid,
   createDefaultGrid,
   getModule,
+  hasTurret,
   isAnchorCell,
   isCoreCell,
   isTurretCell,
   moduleIdOf,
+  partRole,
   turretOrigin,
   TURRET_SIZE,
+  type PartRole,
 } from "./modules";
 import { sfxBoom, sfxHit, sfxShot } from "./sfx";
 import { computeStats, fuelDrainPerSecond, maxDriveSpeed, maxTurnRate } from "./stats";
@@ -26,6 +29,16 @@ import type { ModuleKind } from "./types";
 
 const TURRET_TURN = 4.6;
 const LAVA_DPS = 18;
+/** Shield HP added by each generator. Recharge rate also scales with the count. */
+const SHIELD_HP = 80;
+const SHIELD_DELAY = 3.5;
+const SHIELD_REGEN = 24;
+const DRONE_HP = 34;
+const DRONE_PERIOD = 8;
+const DRONE_FIRST = 1.15;
+const DRONE_DAMAGE = 8;
+const DRONE_LIFE = 1.05;
+const DRONE_SPEED = 168;
 /** Authored module sprites are CELL_ART pixels. On screen each of those maps to an integer run of device pixels. */
 
 interface Sprite {
@@ -75,6 +88,24 @@ interface Tank {
   plate: number[][];
   blueprint: (string | null)[][];
   radius: number;
+  shield: number;
+  shieldMax: number;
+  shieldDelay: number;
+  launch: Record<string, number>;
+}
+
+interface Drone {
+  owner: Side;
+  bay: string;
+  x: number;
+  y: number;
+  angle: number;
+  hp: number;
+  hpMax: number;
+  cooldown: number;
+  radius: number;
+  flash: number;
+  muzzle: number;
 }
 
 interface Shot {
@@ -145,6 +176,10 @@ interface TankDebug {
   cam: number;
   viewW: number;
   lastVolley: Array<{ mount: "hull" | "turret"; angle: number }>;
+  shield: number;
+  shieldMax: number;
+  drones: number;
+  hull: string;
 }
 
 declare global {
@@ -191,16 +226,23 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   scrap.append(el("span", "scrap-nut", "⬡"), scrapValue);
   hud.append(exit, readout, scrap);
 
+  const turreted = hasTurret(options.hull);
   const help = el(
     "p",
     "battle-help",
-    "Up/down drives, left/right turns. Aim stick spins the turret and fires every gun.",
+    turreted
+      ? "Up/down drives, left/right turns. Aim stick spins the turret and fires every gun."
+      : "Up/down drives, left/right turns. Guns fire along the hull. Hold the aim stick to shoot.",
   );
   const status = el("p", "battle-status");
   status.setAttribute("aria-live", "polite");
 
   const moveStick = joystick("move", "Move", "Move. Up and down drive. Left and right turn.");
-  const aimStick = joystick("aim", "Aim", "Aim. Spins the turret and fires while held.");
+  const aimStick = joystick(
+    "aim",
+    "Aim",
+    turreted ? "Aim. Spins the turret and fires while held." : "Aim. Fires every hull gun while held.",
+  );
 
   const banner = el("p", "map-banner");
   banner.setAttribute("aria-live", "polite");
@@ -248,6 +290,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   let camY = 0;
   let camAngle = 0;
   let shots: Shot[] = [];
+  let drones: Drone[] = [];
   let particles: Particle[] = [];
   let floaters: Floater[] = [];
   let lastVolley: TankDebug["lastVolley"] = [];
@@ -268,6 +311,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     player = spawnTank("player", "You", playerBlueprint, map.spawnA.x, map.spawnA.y, 0, options.hull);
     rival = spawnTank("rival", options.rivalName, options.rivalGrid, map.spawnB.x, map.spawnB.y, Math.PI, options.rivalHull);
     shots = [];
+    drones = [];
     particles = [];
     floaters = [];
     shake = 0;
@@ -290,6 +334,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     });
     stepTank(player, playerCmd, dt);
     stepTank(rival, rivalCmd, dt);
+    stepDrones(dt);
     if (defeated(player)) finish("lose");
     else if (defeated(rival)) finish("win");
     if (phase !== "play") {
@@ -305,6 +350,15 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       shot.y += shot.vy * dt;
       shot.life -= dt;
       if (shot.life <= 0 || shot.x < -20 || shot.y < -20 || shot.x > map.w + 20 || shot.y > map.h + 20 || hitsBlock(map, shot.x, shot.y, shot.r)) {
+        shots.splice(i, 1);
+        continue;
+      }
+      const drone = drones.find(
+        (unit) => unit.hp > 0 && unit.owner !== shot.owner && Math.hypot(shot.x - unit.x, shot.y - unit.y) <= unit.radius + shot.r,
+      );
+      if (drone) {
+        hurtDrone(drone, shot.damage);
+        if (drone.hp <= 0) drones.splice(drones.indexOf(drone), 1);
         shots.splice(i, 1);
         continue;
       }
@@ -343,10 +397,11 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     tank.x = solved.x;
     tank.y = solved.y;
     if (hitsHazard(map, tank.x, tank.y, tank.radius * 0.72)) {
-      tank.core -= LAVA_DPS * dt;
+      tank.core -= absorb(tank, LAVA_DPS * dt);
       tank.flash = Math.max(tank.flash, 0.1);
     }
-    if (cmd.aimAngle !== null) tank.turret = rotateToward(tank.turret, cmd.aimAngle, TURRET_TURN * dt);
+    if (!hasTurret(tank.hull)) tank.turret = tank.angle;
+    else if (cmd.aimAngle !== null) tank.turret = rotateToward(tank.turret, cmd.aimAngle, TURRET_TURN * dt);
     tank.flash = Math.max(0, tank.flash - dt);
     tank.muzzle = Math.max(0, tank.muzzle - dt);
     tank.sparkLife = Math.max(0, tank.sparkLife - dt);
@@ -369,6 +424,8 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
         emitExhaust(tank);
       }
     }
+    stepShield(tank, dt, stats.powerFactor);
+    stepLaunch(tank, dt, stats.powerFactor);
     if (tank.cooldown > 0) tank.cooldown -= dt;
     if (cmd.fire && tank.cooldown <= 0 && stats.fireRate > 0) {
       fireGuns(tank);
@@ -380,19 +437,29 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     const guns = listGuns(tank.grid, tank.hull);
     for (const gun of guns) {
       const angle = gun.mount === "turret" ? tank.turret : tank.angle;
-      const reach = gun.heavy ? 1.7 : 0.95;
+      const reach = gun.siege ? 2.35 : gun.heavy ? 1.7 : 0.95;
       const muzzle = mountPoint(tank, gun.lx, gun.ly - CELL * reach, gun.mount === "turret");
-      const speed = 540;
+      const speed = gun.siege ? 470 : 540;
       shots.push({
         x: muzzle.x,
         y: muzzle.y,
         vx: Math.sin(angle) * speed,
         vy: -Math.cos(angle) * speed,
-        r: gun.heavy ? 6.4 : 4.5,
+        r: gun.siege ? 8.2 : gun.heavy ? 6.4 : 4.5,
         damage: gun.damage,
         life: gun.life,
         owner: tank.id,
-        color: gun.heavy ? (tank.id === "player" ? PAL.cyan : PAL.cream) : tank.id === "player" ? PAL.teal : PAL.orange,
+        color: gun.siege
+          ? tank.id === "player"
+            ? PAL.gold
+            : PAL.amber
+          : gun.heavy
+            ? tank.id === "player"
+              ? PAL.cyan
+              : PAL.cream
+            : tank.id === "player"
+              ? PAL.teal
+              : PAL.orange,
       });
     }
     if (tank.id === "player") {
@@ -401,7 +468,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
         angle: gun.mount === "turret" ? tank.turret : tank.angle,
       }));
     }
-    if (shots.length > 80) shots.splice(0, shots.length - 80);
+    if (shots.length > 120) shots.splice(0, shots.length - 120);
     tank.flash = 0.06;
     tank.muzzle = 0.09;
     if (tank.id === "player") sfxShot();
@@ -421,18 +488,29 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
         if (!best || dist < best.d) best = { r, c, d: dist, turret };
       }
     }
-    if (!best) return false;
+    const bubble = tank.shield > 0 && inBubble(tank, shot);
+    let damage = shot.damage;
+    if (bubble) {
+      damage = absorb(tank, damage);
+      if (damage <= 0) {
+        const edge = shieldRadius(tank);
+        burst(tank.x + (shot.x - tank.x) / edge * 8, tank.y + (shot.y - tank.y) / edge * 8, PAL.cyan, 5);
+        return true;
+      }
+    }
+    if (!best) return bubble;
     if (tank.grid[best.r][best.c]) {
-      hurtCell(tank, best.r, best.c, shot.damage);
+      hurtCell(tank, best.r, best.c, damage);
       sfxHit();
       return true;
     }
-    if (!best.turret) return false;
-    tank.core -= shot.damage;
+    const core = isCoreCell(best.r, best.c, cols, rows, tank.hull);
+    if (!best.turret && !core) return bubble;
+    tank.core -= damage;
     tank.flash = 0.12;
     sfxHit();
     const center = cellCenter(best.c, best.r, cols, rows);
-    const world = mountPoint(tank, center.x, center.y, true);
+    const world = mountPoint(tank, center.x, center.y, best.turret);
     floaters.push({ x: world.x, y: world.y, text: "Core hit", life: 0.7 });
     if (!reduceMotion) shake = Math.min(8, shake + (tank.id === "player" ? 3 : 1));
     return true;
@@ -495,12 +573,16 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       drawSmoothArena();
       drawSmoothTank(rival, "#5a2430");
       drawSmoothTank(player, "#2a3142");
+      for (const tank of [rival, player]) drawSmoothShield(tank);
+      for (const drone of drones) drawSmoothDrone(drone);
       for (const shot of shots) {
         pen.save();
         pen.translate(shot.x, shot.y);
         pen.rotate(Math.atan2(shot.vy, shot.vx));
         pen.fillStyle = shot.color;
-        traceRoundRect(pen, -12, -3, 16, 6, 3);
+        const length = 8 + shot.r * 1.7;
+        const thick = Math.max(4, shot.r * 0.72);
+        traceRoundRect(pen, -length, -thick / 2, length + 4, thick, 3);
         pen.fill();
         pen.restore();
       }
@@ -532,6 +614,8 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     if (pixel) {
       drawTank(rival, PAL.redDark, view);
       drawTank(player, PAL.navy, view);
+      for (const tank of [rival, player]) drawPixelShield(tank, view);
+      for (const drone of drones) drawPixelDrone(drone, view);
       for (const shot of shots) drawShot(shot, view);
       for (const bit of particles) drawBit(bit, view);
     }
@@ -796,14 +880,16 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     drawSmoothCells(tank, false);
     pen.restore();
 
+    const origin = turretOrigin(tank.hull);
+    if (!origin) return;
     const pivot = turretPivot(cols, rows, tank.hull);
+    if (!pivot) return;
     const pivoted = localToWorld(pivot.x, pivot.y, tank.angle);
     pen.save();
     pen.translate(tank.x + pivoted.x, tank.y + pivoted.y);
     pen.rotate(tank.turret);
     pen.translate(-pivot.x, -pivot.y);
     drawSmoothCells(tank, true);
-    const origin = turretOrigin(tank.hull);
     const top = cellCenter(origin.c, origin.r, cols, rows);
     pen.strokeStyle = "#ffb703";
     pen.lineWidth = 3;
@@ -841,11 +927,14 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
         }
         if (!id || !mod) continue;
         const moving = Math.hypot(tank.vx, tank.vy) > 18;
-        const anchor = isAnchorCell(id, r, c);
+        const role = partRole(id, r, c);
         if (mod.kind === "weapon") {
-          if (mod.id === "medium-cannon" && !anchor) drawSmoothBreech(center.x, center.y, size);
+          if (mod.id === "heavy-cannon") drawSmoothHeavy(center.x, center.y, size, role, tank.muzzle > 0 && role === "front");
+          else if (mod.id === "medium-cannon" && role === "rear") drawSmoothBreech(center.x, center.y, size);
           else drawSmoothCannon(center.x, center.y, size, tank.muzzle > 0, (mod.rows ?? 1) > 1);
-        } else if (mod.kind === "engine") drawSmoothEngine(center.x, center.y, size, moving, simTime + r * 1.7 + c);
+        } else if (mod.drone) drawSmoothBay(center.x, center.y, size, role);
+        else if (mod.generator) drawSmoothGenerator(center.x, center.y, size, role);
+        else if (mod.kind === "engine") drawSmoothEngine(center.x, center.y, size, moving, simTime + r * 1.7 + c);
         else {
           pen.fillStyle = "rgba(255,255,255,0.22)";
           pen.fillRect(x + 3, y + 3, size - 6, 4);
@@ -926,6 +1015,164 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       pen.fillStyle = "#fff7d6";
       pen.beginPath();
       pen.arc(0, -half - length * 0.7, size * 0.14, 0, Math.PI * 2);
+      pen.fill();
+    }
+    pen.restore();
+  }
+
+  function drawSmoothHeavy(x: number, y: number, size: number, role: PartRole, flash: boolean): void {
+    const half = size / 2;
+    pen.save();
+    pen.translate(x, y);
+    pen.strokeStyle = "#0e1116";
+    pen.lineWidth = 2;
+    if (role === "rear") {
+      pen.fillStyle = "#6a5830";
+      traceRoundRect(pen, -half * 0.78, -half * 0.55, half * 1.56, half * 1.25, 3);
+      pen.fill();
+      pen.stroke();
+      pen.fillStyle = "#241c10";
+      pen.fillRect(-half * 0.42, -half * 0.22, half * 0.84, half * 0.62);
+      pen.fillStyle = "#f0d78a";
+      pen.beginPath();
+      pen.arc(-half * 0.42, -half * 0.28, 2.2, 0, Math.PI * 2);
+      pen.arc(half * 0.42, half * 0.28, 2.2, 0, Math.PI * 2);
+      pen.fill();
+    } else if (role === "mid") {
+      const grad = pen.createLinearGradient(-half * 0.4, 0, half * 0.4, 0);
+      grad.addColorStop(0, "#4a3514");
+      grad.addColorStop(0.45, "#fff1c2");
+      grad.addColorStop(1, "#3a2a10");
+      pen.fillStyle = grad;
+      pen.fillRect(-half * 0.36, -half * 1.15, half * 0.72, half * 2.3);
+      pen.strokeRect(-half * 0.36, -half * 1.15, half * 0.72, half * 2.3);
+      pen.fillStyle = "#241c10";
+      pen.fillRect(-half * 0.7, -half * 0.16, half * 1.4, half * 0.32);
+    } else {
+      const width = size * 0.42;
+      const length = size * 2.35;
+      const grad = pen.createLinearGradient(-width / 2, 0, width / 2, 0);
+      grad.addColorStop(0, "#5c4318");
+      grad.addColorStop(0.35, "#f0d78a");
+      grad.addColorStop(0.5, "#fff6d0");
+      grad.addColorStop(0.7, "#c8963a");
+      grad.addColorStop(1, "#3a2a10");
+      pen.fillStyle = grad;
+      traceRoundRect(pen, -width / 2, -half - length * 0.72, width, length, 2);
+      pen.fill();
+      pen.stroke();
+      pen.fillStyle = "#241c10";
+      pen.fillRect(-width * 0.72, -half - length * 0.72, width * 1.44, 5);
+      pen.fillRect(-width * 0.62, -half - length * 0.28, width * 1.24, 4);
+      pen.fillStyle = "#2a2418";
+      pen.fillRect(-half * 0.72, half * 0.05, half * 1.44, half * 0.7);
+      if (flash) {
+        pen.fillStyle = "rgba(255, 220, 120, 0.95)";
+        pen.beginPath();
+        pen.arc(0, -half - length * 0.78, size * 0.38, 0, Math.PI * 2);
+        pen.fill();
+        pen.fillStyle = "#fff7d6";
+        pen.beginPath();
+        pen.arc(0, -half - length * 0.78, size * 0.16, 0, Math.PI * 2);
+        pen.fill();
+      }
+    }
+    pen.restore();
+  }
+
+  function drawSmoothBay(x: number, y: number, size: number, role: PartRole): void {
+    const half = size / 2;
+    pen.save();
+    pen.translate(x, y);
+    pen.fillStyle = "#2a2c38";
+    pen.strokeStyle = "#0e1116";
+    pen.lineWidth = 1.6;
+    pen.fillRect(-half * 0.7, -half * 0.7, half * 1.4, half * 1.4);
+    pen.strokeRect(-half * 0.7, -half * 0.7, half * 1.4, half * 1.4);
+    if (role === "nw" || role === "single") {
+      pen.fillStyle = "#243044";
+      traceRoundRect(pen, -half * 0.45, -half * 0.15, half * 0.9, half * 0.7, 2);
+      pen.fill();
+      pen.stroke();
+      pen.fillStyle = "#d8fff8";
+      pen.fillRect(-half * 0.12, -half * 0.85, half * 0.24, half * 0.75);
+    }
+    pen.restore();
+  }
+
+  function drawSmoothGenerator(x: number, y: number, size: number, role: PartRole): void {
+    const half = size / 2;
+    const ox = role === "ne" || role === "se" ? -half * 0.35 : half * 0.35;
+    const oy = role === "sw" || role === "se" ? -half * 0.35 : half * 0.35;
+    pen.save();
+    pen.translate(x + ox, y + oy);
+    pen.strokeStyle = "#d8fff8";
+    pen.fillStyle = "rgba(136, 232, 216, 0.35)";
+    pen.lineWidth = 2.4;
+    pen.beginPath();
+    pen.arc(0, 0, half * 0.72, 0, Math.PI * 2);
+    pen.fill();
+    pen.stroke();
+    if (role === "nw" || role === "single") {
+      pen.fillStyle = "#f0d050";
+      pen.beginPath();
+      pen.arc(half * 0.2, half * 0.2, 2.4, 0, Math.PI * 2);
+      pen.fill();
+    }
+    pen.restore();
+  }
+
+  function drawSmoothShield(tank: Tank): void {
+    if (tank.shield <= 0 || tank.shieldMax <= 0) return;
+    const radius = shieldRadius(tank);
+    const frac = clamp(tank.shield / tank.shieldMax, 0, 1);
+    pen.save();
+    pen.translate(tank.x, tank.y);
+    pen.globalAlpha = 0.16 + frac * 0.22;
+    pen.fillStyle = frac > 0.28 ? "#88e8d8" : "#f0d050";
+    pen.beginPath();
+    pen.arc(0, 0, radius, 0, Math.PI * 2);
+    pen.fill();
+    pen.globalAlpha = 0.55 + frac * 0.4;
+    pen.strokeStyle = frac > 0.28 ? "#e8fffb" : "#fff1b0";
+    pen.lineWidth = 4;
+    pen.stroke();
+    pen.restore();
+  }
+
+  function drawSmoothDrone(drone: Drone): void {
+    if (drone.hp <= 0) return;
+    pen.save();
+    pen.translate(drone.x + 2, drone.y + 3);
+    pen.rotate(drone.angle);
+    pen.fillStyle = "rgba(0,0,0,0.28)";
+    pen.beginPath();
+    pen.ellipse(0, 0, 16, 20, 0, 0, Math.PI * 2);
+    pen.fill();
+    pen.restore();
+    pen.save();
+    pen.globalAlpha = drone.flash > 0 ? 0.7 : 1;
+    pen.translate(drone.x, drone.y);
+    pen.rotate(drone.angle);
+    pen.fillStyle = drone.owner === "player" ? "#1c6e66" : "#8a3a28";
+    pen.strokeStyle = "#0e1116";
+    pen.lineWidth = 2;
+    traceRoundRect(pen, -13, -16, 26, 32, 4);
+    pen.fill();
+    pen.stroke();
+    pen.fillStyle = "#141820";
+    pen.fillRect(-16, -12, 4, 24);
+    pen.fillRect(12, -12, 4, 24);
+    pen.fillStyle = "#d8fff8";
+    traceRoundRect(pen, -3.5, -30, 7, 16, 2);
+    pen.fill();
+    pen.stroke();
+    pen.fillStyle = "#241c10";
+    pen.fillRect(-6, -32, 12, 4);
+    if (drone.muzzle > 0) {
+      pen.fillStyle = "rgba(255, 236, 160, 0.95)";
+      pen.beginPath();
+      pen.arc(0, -34, 5, 0, Math.PI * 2);
       pen.fill();
     }
     pen.restore();
@@ -1099,6 +1346,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     blitRotated(hullSprite.canvas, at.x, at.y, tank.angle - camAngle, pad + gridW / 2, pad + gridH / 2);
 
     const origin = turretOrigin(tank.hull);
+    if (!origin) return;
     const pivotX = pad + (origin.c + 1) * cell + cell / 2;
     const pivotY = pad + (origin.r + 1) * cell + cell / 2;
     paintLayer(turretSprite, gridW + pad * 2, gridH + pad * 2, () => {
@@ -1113,6 +1361,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       ctx.fillRect(x + cell * 3 - 2, y, 2, cell * 3);
     });
     const pivot = turretPivot(cols, rows, tank.hull);
+    if (!pivot) return;
     const spun = localToWorld(pivot.x, pivot.y, tank.angle);
     const tip = worldToArt(tank.x + spun.x, tank.y + spun.y, view);
     blitRotated(turretSprite.canvas, tip.x, tip.y, tank.turret - camAngle, pivotX, pivotY);
@@ -1138,12 +1387,21 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
         const token = tank.grid[r][c];
         const id = moduleIdOf(token);
         const anchor = isAnchorCell(token, r, c);
+        const role = partRole(token, r, c);
+        const quad = role === "ne" ? 1 : role === "sw" ? 2 : role === "se" ? 3 : 0;
         const art = moduleArt(id ?? "", {
-          flash: Boolean(id && (id === "cannon" || id === "medium-cannon") && anchor && tank.muzzle > 0),
+          flash: Boolean(id && (id === "cannon" || id === "medium-cannon" || id === "heavy-cannon") && anchor && tank.muzzle > 0),
           puff: id === "engine" && moving && Math.floor(simTime * 8) % 2 === 0,
-          rear: id === "medium-cannon" && !anchor,
+          rear: role === "rear",
+          mid: role === "mid",
+          quad,
         });
-        const scaled = nearestScale(art, Math.round((art.width * cell) / CELL_ART), Math.round((art.height * cell) / CELL_ART), `${id ?? "empty"}-${art.width}x${art.height}-${cell}-${tank.muzzle > 0}-${moving}`);
+        const scaled = nearestScale(
+          art,
+          Math.round((art.width * cell) / CELL_ART),
+          Math.round((art.height * cell) / CELL_ART),
+          `${id ?? "empty"}-${role}-${art.width}x${art.height}-${cell}-${tank.muzzle > 0}-${moving}`,
+        );
         const body = scaled.height - cell;
         ctx.drawImage(scaled, pad + c * cell, pad + r * cell - Math.max(0, body));
         if (isCoreCell(r, c, cols, rows, tank.hull)) {
@@ -1193,7 +1451,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   function drawShot(shot: Shot, view: Frame): void {
     const at = worldToArt(shot.x, shot.y, view);
     const src = shotArt();
-    const w = Math.max(8, Math.round(view.cellPx * 0.9));
+    const w = Math.max(8, Math.round(view.cellPx * (shot.r > 7 ? 1.45 : shot.r > 5 ? 1.1 : 0.9)));
     const h = Math.max(4, Math.round(w * 0.5));
     const scaled = nearestScale(src, w, h, `shot-${w}`);
     context.save();
@@ -1395,6 +1653,10 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       cam: camAngle,
       viewW: measure().viewW,
       lastVolley,
+      shield: player.shield,
+      shieldMax: player.shieldMax,
+      drones: drones.filter((drone) => drone.owner === "player" && drone.hp > 0).length,
+      hull: player.hull,
     });
   }
 
@@ -1474,6 +1736,222 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     }
   }
 
+  function shieldRadius(tank: Tank): number {
+    const cols = tank.grid[0]?.length ?? 1;
+    const rows = tank.grid.length;
+    return Math.hypot(cols * CELL * 0.5, rows * CELL * 0.5) * 0.92;
+  }
+
+  function inBubble(tank: Tank, shot: Shot): boolean {
+    return Math.hypot(shot.x - tank.x, shot.y - tank.y) <= shieldRadius(tank) + shot.r;
+  }
+
+  function absorb(tank: Tank, amount: number): number {
+    if (tank.shield <= 0 || amount <= 0) return amount;
+    const used = Math.min(tank.shield, amount);
+    const broke = tank.shield - used <= 0;
+    tank.shield -= used;
+    tank.shieldDelay = SHIELD_DELAY;
+    if (broke) {
+      tank.shield = 0;
+      floaters.push({ x: tank.x, y: tank.y - shieldRadius(tank), text: "Shield down", life: 0.8 });
+      burst(tank.x, tank.y, PAL.cyan, 14);
+    }
+    return amount - used;
+  }
+
+  function stepShield(tank: Tank, dt: number, powerFactor: number): void {
+    const gens = shieldGenerators(tank.grid);
+    tank.shieldMax = gens * SHIELD_HP;
+    if (tank.shield > tank.shieldMax) tank.shield = tank.shieldMax;
+    if (tank.shieldMax <= 0) return;
+    if (tank.shieldDelay > 0) tank.shieldDelay = Math.max(0, tank.shieldDelay - dt);
+    else if (tank.shield < tank.shieldMax && powerFactor > 0) {
+      tank.shield = Math.min(tank.shieldMax, tank.shield + SHIELD_REGEN * gens * powerFactor * dt);
+    }
+  }
+
+  function stepLaunch(tank: Tank, dt: number, powerFactor: number): void {
+    const bays = droneBays(tank);
+    for (const key of bays) {
+      const live = drones.some((drone) => drone.owner === tank.id && drone.bay === key && drone.hp > 0);
+      if (live) {
+        tank.launch[key] = DRONE_PERIOD;
+        continue;
+      }
+      if (powerFactor <= 0) continue;
+      const left = (tank.launch[key] ?? DRONE_FIRST) - dt;
+      tank.launch[key] = left;
+      if (left <= 0) {
+        spawnDrone(tank, key);
+        tank.launch[key] = DRONE_PERIOD;
+      }
+    }
+  }
+
+  function droneBays(tank: Tank): string[] {
+    const keys: string[] = [];
+    tank.grid.forEach((row, r) => {
+      row.forEach((token, c) => {
+        if (!isAnchorCell(token, r, c)) return;
+        if (cellModule(token)?.drone) keys.push(`${r},${c}`);
+      });
+    });
+    return keys;
+  }
+
+  function spawnDrone(tank: Tank, bay: string): void {
+    const side = drones.filter((drone) => drone.owner === tank.id).length % 2 === 0 ? 1 : -1;
+    const ang = tank.angle + side * 0.95;
+    const dist = tank.radius + 32;
+    const spot = resolveTank(map, tank.x + Math.sin(ang) * dist, tank.y - Math.cos(ang) * dist, 16);
+    drones.push({
+      owner: tank.id,
+      bay,
+      x: spot.x,
+      y: spot.y,
+      angle: tank.angle,
+      hp: DRONE_HP,
+      hpMax: DRONE_HP,
+      cooldown: 0.35,
+      radius: 16,
+      flash: 0,
+      muzzle: 0,
+    });
+  }
+
+  function stepDrones(dt: number): void {
+    for (let i = drones.length - 1; i >= 0; i -= 1) {
+      const drone = drones[i];
+      if (!drone || drone.hp <= 0) {
+        drones.splice(i, 1);
+        continue;
+      }
+      const parent = drone.owner === "player" ? player : rival;
+      const foe = drone.owner === "player" ? rival : player;
+      const aim = Math.atan2(foe.x - drone.x, -(foe.y - drone.y));
+      const dist = Math.hypot(foe.x - drone.x, foe.y - drone.y);
+      let desired = dist < 110 ? aim + 1.15 : aim;
+      const look = 42;
+      const aheadX = drone.x + Math.sin(drone.angle) * look;
+      const aheadY = drone.y - Math.cos(drone.angle) * look;
+      const blocked =
+        aheadX < drone.radius ||
+        aheadY < drone.radius ||
+        aheadX > map.w - drone.radius ||
+        aheadY > map.h - drone.radius ||
+        hitsBlock(map, aheadX, aheadY, drone.radius);
+      if (blocked) {
+        const left = drone.angle - 1.05;
+        const right = drone.angle + 1.05;
+        const leftHit = hitsBlock(map, drone.x + Math.sin(left) * look, drone.y - Math.cos(left) * look, drone.radius);
+        const rightHit = hitsBlock(map, drone.x + Math.sin(right) * look, drone.y - Math.cos(right) * look, drone.radius);
+        if (!leftHit && rightHit) desired = left;
+        else if (leftHit && !rightHit) desired = right;
+        else desired = drone.angle + 1.25;
+      }
+      drone.angle = rotateToward(drone.angle, desired, 4.8 * dt);
+      drone.x += Math.sin(drone.angle) * DRONE_SPEED * dt;
+      drone.y -= Math.cos(drone.angle) * DRONE_SPEED * dt;
+      nudgeApart(drone, parent, 6);
+      nudgeApart(drone, foe, 4);
+      for (const other of drones) {
+        if (other !== drone && other.hp > 0) nudgeApart(drone, other, 2);
+      }
+      const solved = resolveTank(map, drone.x, drone.y, drone.radius);
+      drone.x = solved.x;
+      drone.y = solved.y;
+      if (hitsHazard(map, drone.x, drone.y, drone.radius * 0.7)) hurtDrone(drone, 14 * dt);
+      if (drone.hp <= 0) {
+        drones.splice(i, 1);
+        continue;
+      }
+      drone.cooldown -= dt;
+      drone.flash = Math.max(0, drone.flash - dt);
+      drone.muzzle = Math.max(0, drone.muzzle - dt);
+      if (dist < 560 && Math.abs(angleDelta(drone.angle, aim)) < 0.45 && drone.cooldown <= 0) {
+        const speed = 430;
+        shots.push({
+          x: drone.x + Math.sin(drone.angle) * 22,
+          y: drone.y - Math.cos(drone.angle) * 22,
+          vx: Math.sin(drone.angle) * speed,
+          vy: -Math.cos(drone.angle) * speed,
+          r: 3.6,
+          damage: DRONE_DAMAGE,
+          life: DRONE_LIFE,
+          owner: drone.owner,
+          color: drone.owner === "player" ? PAL.cyan : PAL.orange,
+        });
+        drone.cooldown = 0.72;
+        drone.muzzle = 0.08;
+      }
+      if (drone.hp <= 0) drones.splice(i, 1);
+    }
+  }
+
+  function nudgeApart(unit: { x: number; y: number; radius: number }, other: { x: number; y: number; radius: number }, pad: number): void {
+    const dx = unit.x - other.x;
+    const dy = unit.y - other.y;
+    const min = unit.radius + other.radius + pad;
+    const dist = Math.hypot(dx, dy) || 0.001;
+    if (dist >= min) return;
+    const push = (min - dist) / dist;
+    unit.x += dx * push;
+    unit.y += dy * push;
+  }
+
+  function hurtDrone(drone: Drone, amount: number): void {
+    if (drone.hp <= 0) return;
+    drone.hp -= amount;
+    drone.flash = 0.12;
+    if (amount > 0) sfxHit();
+    if (drone.hp > 0) return;
+    burst(drone.x, drone.y, drone.owner === "player" ? PAL.teal : PAL.orange, 12);
+    floaters.push({ x: drone.x, y: drone.y, text: "Drone lost", life: 0.7 });
+    if (drone.owner === "player") sfxBoom();
+  }
+
+  function drawPixelShield(tank: Tank, view: Frame): void {
+    if (tank.shield <= 0 || tank.shieldMax <= 0) return;
+    const at = worldToArt(tank.x, tank.y, view);
+    const radius = (shieldRadius(tank) * view.cellPx) / CELL;
+    const frac = clamp(tank.shield / tank.shieldMax, 0, 1);
+    const steps = 32;
+    const size = Math.max(3, Math.round(view.cellPx * 0.22));
+    context.save();
+    context.globalAlpha = 0.45 + frac * 0.5;
+    context.fillStyle = frac > 0.28 ? PAL.cyan : PAL.gold;
+    for (let i = 0; i < steps; i += 1) {
+      const angle = (i / steps) * Math.PI * 2 + simTime * 0.6;
+      const x = Math.round(at.x + Math.cos(angle) * radius);
+      const y = Math.round(at.y + Math.sin(angle) * radius);
+      context.fillRect(x, y, size, size);
+    }
+    context.globalAlpha = 0.18 + frac * 0.16;
+    context.fillStyle = PAL.cyan;
+    const inner = Math.round(radius * 0.72);
+    for (let i = 0; i < 16; i += 1) {
+      const angle = (i / 16) * Math.PI * 2;
+      context.fillRect(Math.round(at.x + Math.cos(angle) * inner), Math.round(at.y + Math.sin(angle) * inner), Math.max(2, size - 1), Math.max(2, size - 1));
+    }
+    context.restore();
+  }
+
+  function drawPixelDrone(drone: Drone, view: Frame): void {
+    if (drone.hp <= 0) return;
+    const at = worldToArt(drone.x, drone.y, view);
+    const src = droneArt(drone.owner, drone.muzzle > 0);
+    const h = Math.max(12, Math.round(view.cellPx * 1.45));
+    const w = Math.max(8, Math.round((h * src.width) / src.height));
+    const scaled = nearestScale(src, w, h, `drone-${drone.owner}-${w}x${h}-${drone.muzzle > 0}`);
+    context.save();
+    context.imageSmoothingEnabled = false;
+    context.translate(Math.round(at.x), Math.round(at.y));
+    context.rotate(drone.angle - camAngle);
+    context.drawImage(scaled, Math.round(-w / 2), Math.round(-h / 2));
+    context.restore();
+  }
+
   function burst(x: number, y: number, color: string, count: number): void {
     for (let i = 0; i < count; i += 1) {
       const angle = Math.random() * Math.PI * 2;
@@ -1529,7 +2007,33 @@ function spawnTank(
     plate: grid.map((row) => row.map((cell) => (cell ? blockPlate(cell) : 0))),
     blueprint: cloneGrid(blueprint),
     radius: Math.max(cols, rows) * CELL * 0.34,
+    shield: shieldGenerators(grid) * SHIELD_HP,
+    shieldMax: shieldGenerators(grid) * SHIELD_HP,
+    shieldDelay: 0,
+    launch: launchClocks(grid),
   };
+}
+
+function shieldGenerators(grid: (string | null)[][]): number {
+  let count = 0;
+  grid.forEach((row, r) => {
+    row.forEach((token, c) => {
+      if (!isAnchorCell(token, r, c)) return;
+      if (cellModule(token)?.generator) count += 1;
+    });
+  });
+  return count;
+}
+
+function launchClocks(grid: (string | null)[][]): Record<string, number> {
+  const clocks: Record<string, number> = {};
+  grid.forEach((row, r) => {
+    row.forEach((token, c) => {
+      if (!isAnchorCell(token, r, c)) return;
+      if (cellModule(token)?.drone) clocks[`${r},${c}`] = DRONE_FIRST;
+    });
+  });
+  return clocks;
 }
 
 function cellModule(token: string | null) {
@@ -1552,8 +2056,9 @@ function defeated(tank: Tank): boolean {
   return !tank.grid.some((row) => row.some((cell) => cell));
 }
 
-function turretPivot(cols: number, rows: number, hull: string): { x: number; y: number } {
+function turretPivot(cols: number, rows: number, hull: string): { x: number; y: number } | null {
   const origin = turretOrigin(hull);
+  if (!origin) return null;
   return cellCenter(origin.c + 1, origin.r + 1, cols, rows);
 }
 
@@ -1565,7 +2070,7 @@ function mountPoint(tank: Tank, lx: number, ly: number, onTurret: boolean): { x:
   }
   const cols = tank.grid[0]?.length ?? 1;
   const rows = tank.grid.length;
-  const pivot = turretPivot(cols, rows, tank.hull);
+  const pivot = turretPivot(cols, rows, tank.hull) ?? { x: 0, y: 0 };
   const base = localToWorld(pivot.x, pivot.y, tank.angle);
   const spun = localToWorld(lx - pivot.x, ly - pivot.y, tank.turret);
   return { x: tank.x + base.x + spun.x, y: tank.y + base.y + spun.y };
