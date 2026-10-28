@@ -190,11 +190,11 @@ export const MODULES: readonly ModuleDef[] = [
     boss: true,
     color: "#8a1020",
     blurb: "boss gun",
-    stats: { damage: 48, fireRate: 0.15, powerUse: 9 },
+    stats: { damage: 160, fireRate: 0.45, powerUse: 9 },
     rows: 3,
     cols: 1,
-    plate: 52,
-    shotLife: 3,
+    plate: 72,
+    shotLife: 4.6,
   },
   {
     id: "boss-grapple",
@@ -204,11 +204,11 @@ export const MODULES: readonly ModuleDef[] = [
     boss: true,
     color: "#c81830",
     blurb: "boss harpoon",
-    stats: { damage: 26, fireRate: 0.24, powerUse: 4 },
+    stats: { damage: 140, fireRate: 1, powerUse: 4 },
     rows: 2,
     cols: 1,
-    plate: 56,
-    shotLife: 1.55,
+    plate: 96,
+    shotLife: 2.4,
     hook: true,
   },
   {
@@ -224,7 +224,7 @@ export const MODULES: readonly ModuleDef[] = [
     cols: 2,
     plate: 70,
     generator: true,
-    shieldHp: 100,
+    shieldHp: 32,
   },
 ];
 
