@@ -534,6 +534,15 @@ h2 {
   color: var(--amber);
   font-weight: 800;
 }
+.pvp-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+  width: min(560px, 100%);
+}
+.pvp-body .btn-primary { align-self: stretch; }
 .callsign-form { display: grid; gap: 10px; width: min(560px, 100%); }
 .callsign-input {
   width: 100%;

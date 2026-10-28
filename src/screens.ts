@@ -626,7 +626,7 @@ export function renderPvp(go: (screen: ScreenId) => void, onFight: (launch: PvpL
     });
     bar.append(el("span", "brand", "PvP"), board, back);
 
-    const body = el("div", "shop-body");
+    const body = el("div", "pvp-body");
     const rating = readRating();
     const who = identity
       ? `${identity.name} · ${rating === null ? "Unranked" : `rating ${rating}`}`
@@ -738,7 +738,7 @@ export function renderLeaderboard(go: (screen: ScreenId) => void): HTMLElement {
   back.type = "button";
   back.addEventListener("click", () => go("pvp"));
   bar.append(el("span", "brand", "Leaderboard"), back);
-  const body = el("div", "shop-body");
+  const body = el("div", "pvp-body");
   const identity = readIdentity();
   const rating = readRating();
   body.append(
