@@ -632,7 +632,6 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       artText(floater.text, floater.x, floater.y, view, PAL.paper);
     }
     for (const tank of [rival, player]) drawTankLabel(tank, view);
-    drawMinimap(view);
     drawArrow(view);
   }
 
@@ -670,49 +669,6 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     context.fillRect(ax - bar / 2, ay + 4, bar, 3);
     context.fillStyle = tank.id === "player" ? PAL.green : PAL.red;
     context.fillRect(ax - bar / 2, ay + 4, Math.round(bar * clamp(tank.core / tank.coreMax, 0, 1)), 3);
-  }
-
-  function drawMinimap(view: Frame): void {
-    const cols = Math.round(map.w / TILE);
-    const rows = Math.round(map.h / TILE);
-    const step = 2;
-    const unit = 4;
-    const mw = Math.ceil(cols / step);
-    const mh = Math.ceil(rows / step);
-    const ox = view.deviceW - mw * unit - 16;
-    const oy = Math.max(16, Math.round(view.deviceH * 0.42));
-    context.fillStyle = PAL.shadow;
-    context.fillRect(ox - unit, oy - unit, mw * unit + unit * 2, mh * unit + unit * 2);
-    context.fillStyle = PAL.paper;
-    context.fillRect(ox - unit, oy - unit, mw * unit + unit * 2, 2);
-    context.fillRect(ox - unit, oy - unit, 2, mh * unit + unit * 2);
-    context.fillStyle = map.ground;
-    context.fillRect(ox, oy, mw * unit, mh * unit);
-    for (const block of map.blocks) {
-      context.fillStyle = block.color;
-      const gx = Math.floor(block.x / (TILE * step));
-      const gy = Math.floor(block.y / (TILE * step));
-      context.fillRect(ox + gx * unit, oy + gy * unit, unit, unit);
-    }
-    for (const pool of map.hazards) {
-      context.fillStyle = PAL.lava;
-      const gx = Math.floor(pool.x / (TILE * step));
-      const gy = Math.floor(pool.y / (TILE * step));
-      context.fillRect(ox + gx * unit, oy + gy * unit, unit, unit);
-    }
-    const mark = (x: number, y: number, color: string): void => {
-      context.fillStyle = color;
-      context.fillRect(ox + Math.round(x / (TILE * step)) * unit - 2, oy + Math.round(y / (TILE * step)) * unit - 2, unit + 2, unit + 2);
-    };
-    mark(rival.x, rival.y, PAL.red);
-    mark(player.x, player.y, PAL.cyan);
-    context.fillStyle = PAL.gold;
-    context.fillRect(
-      ox + Math.round(player.x / (TILE * step)) * unit + Math.round(Math.sin(player.angle) * unit * 2),
-      oy + Math.round(player.y / (TILE * step)) * unit + Math.round(-Math.cos(player.angle) * unit * 2),
-      unit,
-      unit,
-    );
   }
 
   function drawArrow(view: Frame): void {
@@ -1501,7 +1457,8 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     const dpr = Math.min(window.devicePixelRatio || 1, 3);
     const cssW = Math.max(rect.width, 1);
     const cssH = Math.max(rect.height, 1);
-    const targetCss = cssW >= 800 ? 64 : 74;
+    // 1.5× the previous phone zoom. At dpr 2 the 7-long hull lands on a 30px cell and is about 105 CSS px tall.
+    const targetCss = cssW >= 800 ? 96 : 111;
     const rawCell = Math.round((targetCss * dpr) / 7);
     const cellPx = Math.max(CELL_ART, Math.round(rawCell / CELL_ART) * CELL_ART);
     const deviceW = Math.max(1, Math.round(cssW * dpr));
@@ -2076,8 +2033,13 @@ function repairBays(tank: Tank): number {
   return count;
 }
 
+function hadModules(tank: Tank): boolean {
+  return tank.blueprint.some((row) => row.some((cell) => cell));
+}
+
 function defeated(tank: Tank): boolean {
   if (tank.core <= 0) return true;
+  if (!hadModules(tank)) return false;
   return !tank.grid.some((row) => row.some((cell) => cell));
 }
 

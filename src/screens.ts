@@ -93,6 +93,7 @@ export function renderGarage(
   save: SaveData,
   go: (screen: ScreenId) => void,
   persist: () => void,
+  note = "",
 ): HTMLElement {
   const root = el("div", "screen garage-screen");
   const ownedAtStart = modulesFor(save.unlocked);
@@ -123,7 +124,7 @@ export function renderGarage(
 
     const layout = el("div", "garage-layout");
     layout.append(
-      buildStage(save, cols, selected, persist, paint),
+      buildStage(save, cols, selected, persist, paint, note),
       buildSide(save, stats, owned, selected, (id) => {
         selected = id;
         paint();
@@ -143,9 +144,15 @@ function buildStage(
   selected: string,
   persist: () => void,
   paint: () => void,
+  note = "",
 ): HTMLElement {
   const stage = el("section", "builder");
   stage.append(el("h2", undefined, "Hull"), hullPicker(save, persist, paint), artStyleToggle(paint), hint(save.hull));
+  if (note) {
+    const warning = el("p", "battle-note", note);
+    warning.setAttribute("role", "status");
+    stage.append(warning);
+  }
 
   const wrap = el("div", "tank-stage");
   wrap.append(el("div", "front-flag", "Front"));

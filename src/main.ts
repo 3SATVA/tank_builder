@@ -1,6 +1,7 @@
 import { mountBattle } from "./battle";
 import { applyArtStyle } from "./config";
 import { getBot } from "./bots";
+import { gridHasModules } from "./modules";
 import { activeLayout, loadSave, saveGame } from "./save";
 import { renderBots, renderGarage, renderMenu, renderShop, type ScreenId } from "./screens";
 import { unlockAudio } from "./sfx";
@@ -16,6 +17,7 @@ const app: HTMLElement = root;
 const save = loadSave();
 let stopBattle: (() => void) | null = null;
 let opponentId = "rookie";
+let outfitNote = "";
 
 function persist(): void {
   saveGame(save);
@@ -31,7 +33,9 @@ function show(screen: ScreenId, botId?: string): void {
     return;
   }
   if (screen === "garage") {
-    app.replaceChildren(renderGarage(save, show, persist));
+    const note = outfitNote;
+    outfitNote = "";
+    app.replaceChildren(renderGarage(save, show, persist, note));
     return;
   }
   if (screen === "shop") {
@@ -45,6 +49,11 @@ function show(screen: ScreenId, botId?: string): void {
   const bot = getBot(opponentId);
   if (bot.index > save.botsBeaten) {
     show("bots");
+    return;
+  }
+  if (!gridHasModules(activeLayout(save))) {
+    outfitNote = "Mount at least one block before you fight.";
+    show("garage");
     return;
   }
   const host = document.createElement("div");
