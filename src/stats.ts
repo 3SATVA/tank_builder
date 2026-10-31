@@ -139,7 +139,8 @@ export function computeStats(grid: ReadonlyArray<ReadonlyArray<string | null>>):
       }
     }
   }
-  speed = Math.max(12, speed);
+  // 200 is a bare hull plus about three engines. More engines stop adding speed.
+  speed = Math.min(200, Math.max(12, speed));
   turn = Math.max(10, turn);
 
   const averageRate = shooters > 0 ? fireRate / shooters : 0;

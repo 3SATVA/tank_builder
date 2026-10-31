@@ -1044,6 +1044,7 @@ body.in-battle .tab-bar { display: none; }
   display: grid;
   place-items: center;
 }
+.ability[hidden] { display: none; }
 .ability svg.ability-glyph { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; }
 .ability-ring {
   position: absolute;

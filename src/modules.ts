@@ -51,8 +51,8 @@ export const MODULES: readonly ModuleDef[] = [
     name: "Engine",
     starter: true,
     color: PAL.red,
-    blurb: "+30 speed",
-    stats: { speed: 30 },
+    blurb: "+60 speed",
+    stats: { speed: 60 },
   },
   {
     id: "cannon",
