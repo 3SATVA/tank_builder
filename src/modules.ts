@@ -60,8 +60,8 @@ export const MODULES: readonly ModuleDef[] = [
     name: "Cannon",
     starter: true,
     color: PAL.teal,
-    blurb: "16 dmg · 0.62/s · 1 power",
-    stats: { damage: 16, fireRate: 0.62, powerUse: 1 },
+    blurb: "13 dmg · 0.62/s · 1 power",
+    stats: { damage: 13, fireRate: 0.62, powerUse: 1 },
     shotLife: 1.15,
   },
   {
@@ -70,12 +70,14 @@ export const MODULES: readonly ModuleDef[] = [
     name: "Medium Cannon",
     starter: false,
     color: PAL.tealDark,
-    blurb: "42 dmg · 2 cells · 3 power",
-    stats: { damage: 42, fireRate: 0.5, powerUse: 3 },
+    blurb: "50 dmg · splash · 3 power",
+    stats: { damage: 50, fireRate: 0.5, powerUse: 3 },
     rows: 2,
     cols: 1,
     plate: 48,
     shotLife: 2.2,
+    splash: 52,
+    splashDamage: 32,
   },
   {
     id: "repair-bay",
@@ -93,13 +95,14 @@ export const MODULES: readonly ModuleDef[] = [
     name: "Harpoon",
     starter: false,
     color: PAL.tan,
-    blurb: "22 dmg · pulls · uses 3",
+    blurb: "22 dmg · button · uses 3",
     stats: { damage: 22, fireRate: 0.4, powerUse: 3 },
     rows: 2,
     cols: 1,
     plate: 40,
     shotLife: 1.5,
     hook: true,
+    ability: true,
   },
   {
     id: "cutter",
@@ -128,12 +131,14 @@ export const MODULES: readonly ModuleDef[] = [
     name: "Heavy Cannon",
     starter: false,
     color: PAL.sand,
-    blurb: "64 dmg · 3 cells · 5 power",
-    stats: { damage: 64, fireRate: 0.48, powerUse: 5 },
+    blurb: "78 dmg · big splash · 5 power",
+    stats: { damage: 78, fireRate: 0.48, powerUse: 5 },
     rows: 3,
     cols: 1,
     plate: 64,
     shotLife: 3.5,
+    splash: 96,
+    splashDamage: 56,
   },
   {
     id: "robot-bay",
@@ -227,11 +232,43 @@ export const MODULES: readonly ModuleDef[] = [
     generator: true,
     shieldHp: 140,
   },
+  {
+    id: "minelayer",
+    kind: "weapon",
+    name: "Minelayer",
+    starter: false,
+    color: PAL.hay,
+    blurb: "drops mines · uses 2",
+    stats: { damage: 36, powerUse: 2 },
+    rows: 2,
+    cols: 1,
+    plate: 40,
+    mine: true,
+    splash: 58,
+    splashDamage: 36,
+  },
+  {
+    id: "sidewinder",
+    kind: "weapon",
+    name: "Sidewinder",
+    starter: false,
+    color: PAL.cyan,
+    blurb: "flank missile · button · uses 3",
+    stats: { damage: 36, powerUse: 3 },
+    rows: 2,
+    cols: 1,
+    plate: 40,
+    shotLife: 4.2,
+    missile: true,
+    ability: true,
+    splash: 56,
+    splashDamage: 26,
+  },
 ];
 
 /**
- * Scrap price for the newest shop batch: Heavy Cannon, Robot Bay, Gun Deck,
- * and Shield Generator. Change this one number to reprice all four.
+ * Scrap price for the newest shop batch, including the minelayer and the sidewinder.
+ * Change this one number to reprice that whole batch.
  */
 export const NEW_SHOP_COST = 50;
 
@@ -242,10 +279,24 @@ export const NEW_SHOP_COST = 50;
 export const SHOP_ITEMS: readonly ShopItem[] = [
   {
     kind: "module",
+    moduleId: "minelayer",
+    cost: NEW_SHOP_COST,
+    name: "Minelayer",
+    tagline: "Two cells in a line. Drops a mine behind the tank every few seconds. Mines arm after a short delay, then blow up when an enemy hull touches them. The blast hurts nearby blocks. Your own mines ignore you. Three live mines per layer. Draws 2 power.",
+  },
+  {
+    kind: "module",
+    moduleId: "sidewinder",
+    cost: NEW_SHOP_COST,
+    name: "Sidewinder",
+    tagline: "Two cells in a line. Does not fire with the other guns. Press the missile button: every powered sidewinder launches together, curves out wide, and comes in from the side. Area blast on impact. About a 10 second cooldown. Draws 3 power.",
+  },
+  {
+    kind: "module",
     moduleId: "harpoon",
     cost: NEW_SHOP_COST,
     name: "Harpoon",
-    tagline: "Two cells in a line. Fires a short-range spear along the mount, hull or turret. A hit does moderate damage and reels the enemy in. Slow reload. Draws 3 power.",
+    tagline: "Two cells in a line. Press the harpoon button. It no longer fires with the other guns. A hit does moderate damage and reels the enemy in. Draws 3 power.",
   },
   {
     kind: "module",
@@ -259,7 +310,7 @@ export const SHOP_ITEMS: readonly ShopItem[] = [
     moduleId: "heavy-cannon",
     cost: NEW_SHOP_COST,
     name: "Heavy Cannon",
-    tagline: "Three cells in a line, like a longer Medium Cannon. Bigger shell, longer range, slower fire, and a high power draw. All three cells sit on the hull, or all three sit in the turret.",
+    tagline: "Three cells in a line. A heavy shell with a wide blast, so it breaks the block it hits and the ones around it. Slower fire, high power draw. All three cells sit on the hull, or all three sit in the turret.",
   },
   {
     kind: "module",
@@ -301,7 +352,7 @@ export const SHOP_ITEMS: readonly ShopItem[] = [
     moduleId: "medium-cannon",
     cost: 250,
     name: "Medium Cannon",
-    tagline: "Occupies this bay and the one behind it. Thicker barrel, 28 damage, longer range, slower fire. Draws 4 power. Both cells must sit on the hull, or both inside the turret.",
+    tagline: "Occupies this bay and the one behind it. Thicker shell with a blast around the impact, longer range, slower fire. Draws 3 power. Both cells must sit on the hull, or both inside the turret.",
   },
   {
     kind: "hull",

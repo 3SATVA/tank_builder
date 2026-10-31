@@ -166,6 +166,8 @@ function buildStage(
       const role = partRole(token, r, c);
       if (mod?.id === "medium-cannon") cell.classList.add(anchor ? "medium-front" : "medium-rear");
       else if (mod?.id === "heavy-cannon") cell.classList.add("heavy-gun", `seg-${role}`);
+      else if (mod?.id === "minelayer") cell.classList.add("minelayer", `seg-${role}`);
+      else if (mod?.id === "sidewinder") cell.classList.add("sidewinder", `seg-${role}`);
       else if (mod?.id === "robot-bay") cell.classList.add("robot", `seg-${role}`);
       else if (mod?.id === "shield-gen") cell.classList.add("shield", `seg-${role}`);
       else if (mod?.kind === "weapon") cell.classList.add("cannon");
@@ -250,6 +252,8 @@ function moduleFace(mod: ModuleDef, role: PartRole = "single"): HTMLElement {
   }
   if (mod.id === "heavy-cannon") return heavyFace(role);
   if (mod.id === "harpoon") return harpoonFace(role);
+  if (mod.id === "minelayer") return mineFace(role);
+  if (mod.id === "sidewinder") return sidewinderFace(role);
   if (mod.cutter) return sawFace();
   if (mod.id === "robot-bay") return bayFace(role);
   if (mod.id === "shield-gen") return shieldFace(role);
@@ -291,6 +295,18 @@ function heavyFace(role: PartRole): HTMLElement {
   }
   const face = el("span", "cannon-face heavy");
   face.append(el("span", "barrel"), el("span", "breech"));
+  return face;
+}
+
+function mineFace(role: PartRole): HTMLElement {
+  const face = el("span", role === "rear" ? "mine-face rear" : "mine-face");
+  face.append(el("span", "rack"), el("span", "orb"));
+  return face;
+}
+
+function sidewinderFace(role: PartRole): HTMLElement {
+  const face = el("span", role === "rear" ? "sidewinder-face rear" : "sidewinder-face");
+  face.append(el("span", "body"), el("span", "fin"));
   return face;
 }
 
@@ -582,6 +598,8 @@ function tankPreview(save: SaveData): HTMLElement {
       const role = partRole(token, r, c);
       if (mod?.id === "medium-cannon") cell.classList.add(anchor ? "medium-front" : "medium-rear");
       else if (mod?.id === "heavy-cannon") cell.classList.add("heavy-gun", `seg-${role}`);
+      else if (mod?.id === "minelayer") cell.classList.add("minelayer", `seg-${role}`);
+      else if (mod?.id === "sidewinder") cell.classList.add("sidewinder", `seg-${role}`);
       else if (mod?.id === "robot-bay") cell.classList.add("robot", `seg-${role}`);
       else if (mod?.id === "shield-gen") cell.classList.add("shield", `seg-${role}`);
       else if (mod?.kind === "weapon") cell.classList.add("cannon");

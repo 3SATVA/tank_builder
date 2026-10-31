@@ -14,6 +14,10 @@ export interface TankCommands {
   /** World aim. 0 is up the screen, positive is clockwise. Null keeps the turret. */
   aimAngle: number | null;
   fire: boolean;
+  /** Press the harpoon ability. The battle ignores it when the cooldown is running. */
+  harpoon: boolean;
+  /** Press the sidewinder ability. Every powered tube launches together. */
+  sidewinder: boolean;
 }
 
 export interface CombatantView {
@@ -133,7 +137,7 @@ export function createBotController(tuning: BotTuning): TankController {
         forwardCmd = 0;
         aimReady = false;
         faced = false;
-        return { forward: 0, turn: 0, aimAngle: null, fire: false };
+        return { forward: 0, turn: 0, aimAngle: null, fire: false, harpoon: false, sidewinder: false };
       }
       const hullGuns = Boolean(ctx.hullGuns);
       const turretGuns = Boolean(ctx.turretGuns);
@@ -301,7 +305,9 @@ export function createBotController(tuning: BotTuning): TankController {
       const turretOk = turretError < tuning.aimSlack;
       const aligned = hullGuns && turretGuns ? hullOk && turretOk : hullGuns ? hullOk : turretOk;
       const fire = aligned && los && dist > 70 && dist < far * 1.25 && !tooFar;
-      return { forward: forwardCmd, turn: turnCmd, aimAngle: aim, fire };
+      const harpoon = los && dist > 80 && dist < far * 1.15 && (hullError < 0.45 || turretError < 0.35);
+      const sidewinder = dist > 80 && dist < 920;
+      return { forward: forwardCmd, turn: turnCmd, aimAngle: aim, fire, harpoon, sidewinder };
     },
   };
 }

@@ -44,6 +44,16 @@ export interface ModuleDef {
   hook?: boolean;
   /** Damages enemy blocks that touch this cell. Does not fire a shot. */
   cutter?: boolean;
+  /** Drops mines behind the tank while it has power. Not part of the main salvo. */
+  mine?: boolean;
+  /** Launches a curving missile from its own button. Not part of the main salvo. */
+  missile?: boolean;
+  /** Fired from an ability button instead of the main guns. */
+  ability?: boolean;
+  /** Splash radius in pixels. The impact cell still takes full damage. */
+  splash?: number;
+  /** Damage dealt to other blocks inside the splash. */
+  splashDamage?: number;
   /** Campaign bosses only. Never sold, never placed, and stripped from PvP layouts. */
   boss?: boolean;
   /** Shield HP from this generator. Defaults to the standard bubble. */

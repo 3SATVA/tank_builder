@@ -39,19 +39,21 @@ Starter blocks sit on a bare hull (28 speed, 18 turning, 36 fuel). Each armor bl
 | Power | +3 power supply |
 | Fuel | +36 fuel |
 | Engine | +30 speed |
-| Cannon | 16 damage, 0.62 shots/s, short range, uses 1 power |
+| Cannon | 13 damage, 0.62 shots/s, short range, uses 1 power |
 | Heavy armor | 100 plate, −16 speed, −6 turning. Shop, 150 scrap |
 | Repair bay | Restores the most hurt block, or rebuilds a destroyed one, about every 5.5 seconds. Draws 2 power whenever it is mounted. Shop, 200 scrap |
-| Harpoon | 2 cells along the mount. 22 damage, short range, pulls the enemy in on a hit. Uses 3 power. Shop |
+| Harpoon | 2 cells along the mount. Its own button, not the main guns. 22 damage, short range, pulls the enemy in. Uses 3 power. Shop |
 | Cutter | Saws enemy blocks and drones that touch it, 46 damage per second. Uses 2 power. Shop |
-| Medium cannon | 2 cells along the hull (this bay and the one behind it). 42 damage, longer range, 0.50 shots/s, uses 3 power. Both cells must be hull, or both inside the turret. Shop, 250 scrap |
-| Heavy cannon | 3 cells in a line. 64 damage, one-shots a normal plate, longest range, 0.48 shots/s, uses 5 power. All three cells on the hull or all three in the turret. Shop |
+| Medium cannon | 2 cells along the hull (this bay and the one behind it). 50 damage plus a blast around the impact, longer range, 0.50 shots/s, uses 3 power. Both cells must be hull, or both inside the turret. Shop, 250 scrap |
+| Heavy cannon | 3 cells in a line. 78 damage and a wider blast, so it breaks the block it hits and the ones beside it. Longest range, 0.48 shots/s, uses 5 power. All three cells on the hull or all three in the turret. Shop |
+| Minelayer | 2 cells. Drops a mine behind the tank. Mines arm, then explode when an enemy hull touches them. They do not hurt their owner. Three live mines per layer. Uses 2 power. Shop |
+| Sidewinder | 2 cells. Missile button, not the main guns. Every powered tube fires together, curves out, and comes in from the side. Area blast. About 10 seconds between presses. Uses 3 power. Shop |
 | Robot bay | 2×2. Launches one light drone that flanks and shoots for 5 damage. One drone per bay. Uses 5 power. Shop |
 | Shield generator | 2×2. The first bubble is the big one. Extra generators add less HP and less recharge. Uses 4 power. Shop |
 | Rear turret tank | Same 5×7 size with the 3×3 turret on the back three rows, so the nose can be armor. Own layout. Shop, 300 scrap |
 | Gun deck | No turret. 6 wide × 7 long, more bays than the standard hull. Every gun faces with the hull, so it suits a committed gun line. Starts empty. Shop |
 
-The four newest shop entries (heavy cannon, robot bay, gun deck, shield generator) share `NEW_SHOP_COST` in `src/modules.ts`. It is 50 scrap while they are being tested. Change that one number to reprice all four.
+The newest shop entries, including the heavy cannon, robot bay, gun deck, shield generator, minelayer, and sidewinder, share `NEW_SHOP_COST` in `src/modules.ts`. It is 50 scrap while they are being tested. Change that one number to reprice the batch.
 
 The default hull is 5 blocks wide and 7 long, with the front row at the top. The long axis is forward: that is the way the hull drives and the way hull cannons fire. A centered 3×3 turret carries two of the four cannons; the other two sit on the front of the hull. The rear-turret hull keeps the same footprint and moves the gold 3×3 to rows 5–7. Bought hulls, including the rear turret and the gun deck, start with empty bays, and Reset clears them back to empty. The starter loadout is eight armor, four tracks, two engines, four fuel, and two power cells. Each power cell supplies 3, so the starter sits at 4 draw against 6 supply. Rookie keeps one power cell for two cannons. Veteran keeps two power cells for four cannons and a repair bay. Warlord keeps three for three cannons, a medium cannon, and a repair bay. A fight needs at least one weapon and one power block; otherwise the garage keeps you there with a note. Power is a hard budget. Weapons are fed first, then shields, repair bays, and robot bays. Anything past the supply is unpowered and does nothing, in the garage and in battle, including bots and posted tanks. A hull with no working tracks, no working engine, or no fuel cannot drive or turn. The turret and powered guns still work. The HUD says Immobile, and the garage warns without blocking the fight. The tank selected in the garage is the PvP defense. Opening the app, switching hulls, or editing that layout posts it after a short pause. Battle posts that same tank again before it searches. A tank with no weapon or no power block is not posted. A repair bay draws its power whenever it is mounted.
 

@@ -593,6 +593,58 @@ const GRAPPLE_FRONT = [
   "KKKKKKKKKK",
 ];
 
+const MINELAYER_FRONT = [
+  "KKKKKKKKKK",
+  "KSSSSSSSSK",
+  "KSMMMMMMMK",
+  "KSMMMMMMMK",
+  "KSSSSSSSSK",
+  "KKKKKKKKKK",
+  "KWWWWWWWWK",
+  "KWAAAAAAWK",
+  "KWWWWWWWWK",
+  "KKKKKKKKKK",
+];
+
+const MINELAYER_REAR = [
+  "KKKKKKKKKK",
+  "KIIIIIIIIK",
+  "KISSSSSSIK",
+  "KISSSSSSIK",
+  "KIIIIIIIIK",
+  "KIIIIIIIIK",
+  "KISSSSSSIK",
+  "KISSSSSSIK",
+  "KIIIIIIIIK",
+  "KKKKKKKKKK",
+];
+
+const SIDEWINDER_FRONT = [
+  "....TT....",
+  "...TTTT...",
+  "..TTTTTT..",
+  ".KKTTTTKK.",
+  "KYYTTTTYYK",
+  "KYYYYYYYYK",
+  "KYYSSSSYYK",
+  "KKSSSSSSKK",
+  "KSSSSSSSSK",
+  "KKKKKKKKKK",
+];
+
+const SIDEWINDER_REAR = [
+  "KKKKKKKKKK",
+  "KSSSSSSSSK",
+  "KSIIIIIIIK",
+  "KSSSSSSSSK",
+  "KKKKKKKKKK",
+  "KYYYYYYYYK",
+  "KYYSSSSYYK",
+  "KYYYYYYYYK",
+  "KSSSSSSSSK",
+  "KKKKKKKKKK",
+];
+
 export function moduleArt(id: string, opts: SpriteOpts = {}): HTMLCanvasElement {
   if (id === "heavy-armor") return bake(HEAVY, "heavy");
   if (id === "repair-bay") return bake(REPAIR, "repair");
@@ -612,6 +664,11 @@ export function moduleArt(id: string, opts: SpriteOpts = {}): HTMLCanvasElement 
     return bake(opts.flash ? HARPOON_FLASH : HARPOON, opts.flash ? "harp-flash" : "harp");
   }
   if (id === "cutter") return bake(CUTTER, "cutter");
+  if (id === "minelayer") return bake(opts.rear ? MINELAYER_REAR : MINELAYER_FRONT, opts.rear ? "mine-rear" : "mine");
+  if (id === "sidewinder") {
+    if (opts.rear) return bake(SIDEWINDER_REAR, "side-rear");
+    return bake(opts.flash ? SIDEWINDER_FRONT : SIDEWINDER_FRONT, opts.flash ? "side-flash" : "side");
+  }
   if (id === "boss-armor") return bake(BOSS_ARMOR, "boss-armor");
   if (id === "reactor") return bake(REACTOR, "reactor");
   if (id === "super-shield") return bake(SUPER, `super-${opts.quad ?? 0}`);
@@ -1005,6 +1062,8 @@ export function bodyArt(id: string): HTMLCanvasElement {
   if (id === "robot-bay") return bake(ROBOT_ICON, "robot-icon");
   if (id === "shield-gen") return bake(SHIELD_ICON, "shield-icon");
   if (id === "harpoon") return bake(HARPOON_ICON, "harp-icon");
+  if (id === "minelayer") return bake(MINELAYER_REAR, "mine-icon");
+  if (id === "sidewinder") return bake(SIDEWINDER_FRONT, "side-icon");
   const full = moduleArt(id, { rear: id === "medium-cannon" });
   if (full.height <= CELL_ART) return full;
   const key = `body-${id}`;
