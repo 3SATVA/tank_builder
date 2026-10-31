@@ -39,6 +39,10 @@ export interface TankControlContext {
   /** Shots that can hurt this tank. */
   incoming: readonly ShotView[];
   dt: number;
+  /** A powered gun is bolted to the hull, so the hull itself has to aim. */
+  hullGuns?: boolean;
+  /** A powered gun sits on a turret and tracks the aim point on its own. */
+  turretGuns?: boolean;
 }
 
 export interface TankController {
@@ -68,8 +72,9 @@ const SHOT_SPEED = 540;
 const COMMIT = 3.2;
 
 /**
- * The turret tracks every frame. The hull picks a spot and stays with it for a few seconds.
- * It only leaves to get into range, to clear a blocked path, or to step off heavy fire.
+ * The turret tracks every frame. The hull picks a spot and stays with it for a few seconds,
+ * and while it holds it turns to face the target. Hull guns need that facing to be the shot.
+ * Steering eases in, and it will not flick the turn or the throttle back and forth.
  */
 export function createBotController(tuning: BotTuning): TankController {
   let weave = 0;
@@ -82,12 +87,41 @@ export function createBotController(tuning: BotTuning): TankController {
   let reacted = false;
   let turnCmd = 0;
   let forwardCmd = 0;
+  let faced = false;
+  let aimSmooth = 0;
+  let aimReady = false;
+  let rangeBand: "close" | "fight" | "far" = "far";
+  let backUntil = 0;
+  let coolUntil = 0;
+  let drive = 0;
+  let driveUntil = 0;
+  let turnSign = 0;
+  let turnUntil = 0;
 
-  const approach = (x: number, y: number, fx: number, fy: number, dist: number, reach: number): { x: number; y: number } => {
-    const nx = (x - fx) / dist;
-    const ny = (y - fy) / dist;
-    const flank = tuning.strafe * 110 * side;
-    return { x: fx + nx * reach - ny * flank, y: fy + ny * reach + nx * flank };
+  const approach = (
+    sx: number,
+    sy: number,
+    fx: number,
+    fy: number,
+    reach: number,
+    arena: ArenaMap,
+  ): { x: number; y: number } => {
+    const base = Math.atan2(sx - fx, -(sy - fy));
+    const margin = 90;
+    for (const offset of [0, 0.7, -0.7, 1.3, -1.3, 2]) {
+      const ang = base + offset * side;
+      const x = clamp(fx + Math.sin(ang) * reach, margin, arena.w - margin);
+      const y = clamp(fy - Math.cos(ang) * reach, margin, arena.h - margin);
+      if (hasLineOfSight(arena, x, y, fx, fy)) return { x, y };
+    }
+    const span = Math.max(1, Math.hypot(sx - fx, sy - fy));
+    const nx = (sx - fx) / span;
+    const ny = (sy - fy) / span;
+    const flank = tuning.strafe * 90 * side;
+    return {
+      x: clamp(fx + nx * reach - ny * flank, margin, arena.w - margin),
+      y: clamp(fy + ny * reach + nx * flank, margin, arena.h - margin),
+    };
   };
 
   return {
@@ -97,8 +131,13 @@ export function createBotController(tuning: BotTuning): TankController {
       if (!foe) {
         turnCmd = 0;
         forwardCmd = 0;
+        aimReady = false;
+        faced = false;
         return { forward: 0, turn: 0, aimAngle: null, fire: false };
       }
+      const hullGuns = Boolean(ctx.hullGuns);
+      const turretGuns = Boolean(ctx.turretGuns);
+      const hullPrimary = hullGuns && !turretGuns;
       const dx = foe.x - ctx.self.x;
       const dy = foe.y - ctx.self.y;
       const dist = Math.hypot(dx, dy) || 1;
@@ -106,13 +145,31 @@ export function createBotController(tuning: BotTuning): TankController {
       const aim =
         Math.atan2(foe.x + (foe.vx ?? 0) * flight - ctx.self.x, -(foe.y + (foe.vy ?? 0) * flight - ctx.self.y)) +
         Math.sin(weave * 1.1) * tuning.wobble;
+      const hullFlight = (dist / SHOT_SPEED) * Math.min(1, 0.28 + tuning.lead * 0.5);
+      const hullAim = Math.atan2(
+        foe.x + (foe.vx ?? 0) * hullFlight - ctx.self.x,
+        -(foe.y + (foe.vy ?? 0) * hullFlight - ctx.self.y),
+      );
+      if (!aimReady) {
+        aimSmooth = hullAim;
+        aimReady = true;
+      } else {
+        aimSmooth += angleDelta(aimSmooth, hullAim) * Math.min(1, ctx.dt * 3.2);
+      }
+      const bearing = Math.atan2(dx, -dy);
       const span = Math.max(ctx.arena.w, ctx.arena.h);
       const far = Math.min(tuning.far, span * 0.46);
       const near = Math.min(tuning.near, far * 0.72);
       const los = hasLineOfSight(ctx.arena, ctx.self.x, ctx.self.y, foe.x, foe.y);
-      const tooClose = dist < near * 0.82;
-      const tooFar = dist > far;
-      const canShoot = los && !tooClose && !tooFar;
+      if (rangeBand === "fight") {
+        if (dist < near * 0.72) rangeBand = "close";
+        else if (dist > far * 1.08) rangeBand = "far";
+      } else if (rangeBand === "close") {
+        if (dist > near * 1.02) rangeBand = "fight";
+      } else if (dist < far * 0.9) rangeBand = "fight";
+      const tooClose = rangeBand === "close";
+      const tooFar = rangeBand === "far";
+      const canShoot = los && rangeBand === "fight";
       let threats = 0;
       let dodgeSign = side;
       for (const shot of ctx.incoming) {
@@ -130,74 +187,120 @@ export function createBotController(tuning: BotTuning): TankController {
       else notice = 0;
       const seen = notice >= Math.max(0.15, tuning.reaction);
 
-      const begin = (next: "hold" | "go", x: number, y: number, seconds: number): void => {
+      const begin = (next: "hold" | "go", x: number, y: number, seconds: number, flip: boolean): void => {
         mode = next;
         goalX = x;
         goalY = y;
         commit = seconds;
         reacted = false;
-        side *= -1;
+        if (flip) side *= -1;
         notice = 0;
+        if (next === "go") faced = false;
       };
       const dodge = (): void => {
         if (reacted) return;
         reacted = true;
+        if (hullPrimary) {
+          if (weave < coolUntil) return;
+          backUntil = weave + 1.4;
+          coolUntil = weave + 3.6;
+          mode = "hold";
+          commit = 2.2;
+          notice = 0;
+          return;
+        }
         mode = "go";
+        faced = false;
         goalX = ctx.self.x + dodgeSign * 180;
         goalY = ctx.self.y - (dy / dist) * 50;
         commit = 2.8;
         notice = 0;
+        side *= -1;
       };
+
+      if (canShoot && !heavy && mode !== "hold") begin("hold", ctx.self.x, ctx.self.y, 3.6, false);
 
       if (mode === "hold") {
         if (seen && heavy) dodge();
-        else if (seen && tooClose) begin("go", ctx.self.x - (dx / dist) * 200, ctx.self.y - (dy / dist) * 200, 2.8);
+        else if (seen && tooClose && !hullPrimary) begin("go", ctx.self.x - (dx / dist) * 200, ctx.self.y - (dy / dist) * 200, 2.8, true);
         else if (seen && (tooFar || !los)) {
-          const spot = approach(ctx.self.x, ctx.self.y, foe.x, foe.y, dist, (near + far) / 2);
-          begin("go", spot.x, spot.y, COMMIT);
+          const spot = approach(ctx.self.x, ctx.self.y, foe.x, foe.y, (near + far) / 2, ctx.arena);
+          begin("go", spot.x, spot.y, COMMIT, true);
         }
       } else {
         commit -= ctx.dt;
         const arrived = Math.hypot(goalX - ctx.self.x, goalY - ctx.self.y) < 46;
         if (seen && heavy) dodge();
         else if (commit <= 0 || arrived) {
-          if (canShoot && !heavy) begin("hold", ctx.self.x, ctx.self.y, 3.6);
-          else if (tooClose) begin("go", ctx.self.x - (dx / dist) * 200, ctx.self.y - (dy / dist) * 200, 2.8);
+          if (canShoot && !heavy) begin("hold", ctx.self.x, ctx.self.y, 3.6, false);
+          else if (tooClose && !hullPrimary) begin("go", ctx.self.x - (dx / dist) * 200, ctx.self.y - (dy / dist) * 200, 2.8, true);
+          else if (tooClose) begin("hold", ctx.self.x, ctx.self.y, 2.2, false);
           else {
-            const spot = approach(ctx.self.x, ctx.self.y, foe.x, foe.y, dist, (near + far) / 2);
-            begin("go", spot.x, spot.y, COMMIT);
+            const spot = approach(ctx.self.x, ctx.self.y, foe.x, foe.y, (near + far) / 2, ctx.arena);
+            begin("go", spot.x, spot.y, COMMIT, true);
           }
         }
       }
 
-      const aimError = Math.abs(angleDelta(ctx.self.turret, aim));
-      const fire = aimError < tuning.aimSlack && los && dist > 80 && dist < far * 1.2;
       let targetTurn = 0;
       let targetForward = 0;
+      const face = (desired: number, tight: boolean): void => {
+        const delta = angleDelta(ctx.self.angle, desired);
+        const abs = Math.abs(delta);
+        const stop = tight ? 0.05 : 0.12;
+        const resume = tight ? 0.11 : 0.26;
+        if (faced) {
+          if (abs > resume) faced = false;
+        } else if (abs < stop) faced = true;
+        if (faced) targetTurn = 0;
+        else targetTurn = clamp(delta / (tight ? 1.25 : 2.1), -(tight ? 0.72 : 0.42), tight ? 0.72 : 0.42);
+      };
+
       if (mode === "hold") {
-        const bearing = Math.atan2(dx, -dy);
-        const delta = angleDelta(ctx.self.angle, bearing);
-        targetTurn = Math.abs(delta) < 0.2 ? 0 : clamp(delta / 2.4, -0.4, 0.4);
+        face(hullGuns ? aimSmooth : bearing, hullGuns);
+        if (weave < backUntil || (hullPrimary && tooClose)) targetForward = -0.5;
       } else {
         const steer = steerPoint(ctx.arena, ctx.self.x, ctx.self.y, goalX, goalY);
-        if (steer) {
-          const sdx = steer.x - ctx.self.x;
-          const sdy = steer.y - ctx.self.y;
-          if (Math.hypot(sdx, sdy) > 22) {
-            const delta = angleDelta(ctx.self.angle, Math.atan2(sdx, -sdy));
-            targetTurn = Math.abs(delta) < 0.16 ? 0 : clamp(delta / 1.8, -0.62, 0.62);
-            if (Math.abs(delta) < 0.4) targetForward = 0.8;
-            else if (Math.abs(delta) < 1.05) targetForward = 0.28;
-          }
+        const step = steer && Math.hypot(steer.x - ctx.self.x, steer.y - ctx.self.y) > 28 ? steer : null;
+        const sdx = (step ? step.x : goalX) - ctx.self.x;
+        const sdy = (step ? step.y : goalY) - ctx.self.y;
+        if (Math.hypot(sdx, sdy) > 28) {
+          const delta = angleDelta(ctx.self.angle, Math.atan2(sdx, -sdy));
+          const abs = Math.abs(delta);
+          targetTurn = abs < 0.1 ? 0 : clamp(delta / 1.9, -0.55, 0.55);
+          if (abs < 0.42) targetForward = 0.72;
+          else if (abs < 1.05) targetForward = 0.22;
         } else {
-          targetTurn = 0.28 * side;
+          face(hullGuns ? aimSmooth : bearing, hullGuns);
+          if (tooFar) targetForward = 0.55;
         }
       }
-      const slew = 2.2 * ctx.dt;
+
+      if (targetTurn !== 0 && turnSign !== 0 && Math.sign(targetTurn) !== turnSign && weave < turnUntil) targetTurn = 0;
+      else if (Math.abs(targetTurn) > 0.06 && Math.sign(targetTurn) !== turnSign) {
+        turnSign = Math.sign(targetTurn);
+        turnUntil = weave + 0.4;
+      } else if (Math.abs(targetTurn) < 0.02) turnSign = 0;
+
+      const wantSign = Math.sign(targetForward);
+      if (drive !== 0 && wantSign !== 0 && wantSign !== drive && weave < driveUntil) targetForward = drive * 0.45;
+      else if (Math.abs(targetForward) > 0.08 && wantSign !== drive) {
+        drive = wantSign;
+        driveUntil = weave + 0.55;
+      } else if (Math.abs(targetForward) < 0.02) drive = 0;
+
+      const slew = 1.5 * ctx.dt;
       turnCmd += clamp(targetTurn - turnCmd, -slew, slew);
       forwardCmd += clamp(targetForward - forwardCmd, -slew, slew);
-      if (Math.abs(targetTurn) < 0.02) turnCmd = 0;
-      if (targetForward < 0.02) forwardCmd = 0;
+      if (Math.abs(targetTurn) < 0.02 && Math.abs(turnCmd) < 0.045) turnCmd = 0;
+      if (Math.abs(targetForward) < 0.02 && Math.abs(forwardCmd) < 0.045) forwardCmd = 0;
+
+      const hullError = Math.abs(angleDelta(ctx.self.angle, aimSmooth));
+      const turretError = Math.abs(angleDelta(ctx.self.turret, aim));
+      const hullOk = hullError < Math.max(tuning.aimSlack, 0.14);
+      const turretOk = turretError < tuning.aimSlack;
+      const aligned = hullGuns && turretGuns ? hullOk && turretOk : hullGuns ? hullOk : turretOk;
+      const fire = aligned && los && dist > 70 && dist < far * 1.25 && !tooFar;
       return { forward: forwardCmd, turn: turnCmd, aimAngle: aim, fire };
     },
   };

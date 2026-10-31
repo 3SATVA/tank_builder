@@ -199,6 +199,17 @@ interface TankDebug {
   droneY: number;
   droneAngle: number;
   hull: string;
+  /** Ticks sampled while the fight was still going. */
+  aimSamples: number;
+  /** Ticks where the rival's hull was within 12° of the player. */
+  hullOn: number;
+  /** Ticks where the rival's turret was within 12° of the player. */
+  turretOn: number;
+  /** Rival shells that connected with the player, shields included. */
+  rivalHits: number;
+  /** Times the rival's turn command flipped from one side to the other. */
+  turnFlips: number;
+  seconds: number;
 }
 
 declare global {
@@ -206,9 +217,10 @@ declare global {
     __TANK_DEBUG__?: () => TankDebug;
     __TANK_SKIP__?: (seconds: number) => TankDebug | undefined;
     __TANK_DUEL__?: (
-      a: { name: string; hull: string; grid: (string | null)[][] },
-      b: { name: string; hull: string; grid: (string | null)[][] },
+      a: { name: string; hull: string; grid: (string | null)[][]; tuning?: BotTuning },
+      b: { name: string; hull: string; grid: (string | null)[][]; tuning?: BotTuning },
     ) => void;
+    __TANK_BOT__?: (id: string) => { name: string; hull: string; grid: (string | null)[][]; tuning: BotTuning };
   }
 }
 
@@ -302,6 +314,12 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   let lastTime = 0;
   let stopped = false;
   let acc = 0;
+  let aimSamples = 0;
+  let hullOn = 0;
+  let turretOn = 0;
+  let rivalHits = 0;
+  let turnFlips = 0;
+  let lastTurn = 0;
   let player = spawnTank("player", "You", playerBlueprint, map.spawnA.x, map.spawnA.y, 0, options.hull);
   let rival = spawnTank("rival", options.rivalName, options.rivalGrid, map.spawnB.x, map.spawnB.y, Math.PI, options.rivalHull);
   let camX = 0;
@@ -337,6 +355,12 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     shake = 0;
     phase = "play";
     paid = false;
+    aimSamples = 0;
+    hullOn = 0;
+    turretOn = 0;
+    rivalHits = 0;
+    turnFlips = 0;
+    lastTurn = 0;
     endcard.hidden = true;
     showMapTitle();
     syncHud();
@@ -344,6 +368,8 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
   }
 
   function update(dt: number): void {
+    const playerGuns = gunFlags(player);
+    const rivalGuns = gunFlags(rival);
     const playerCmd = playerAi
       ? playerAi.commands({
           self: player,
@@ -351,6 +377,8 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
           arena: map,
           incoming: shots.filter((shot) => shot.owner !== "player").map(shotView),
           dt,
+          hullGuns: playerGuns.hullGuns,
+          turretGuns: playerGuns.turretGuns,
         })
       : commandsFromPlayer(input, player);
     const rivalCmd = rivalAi.commands({
@@ -359,7 +387,10 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       arena: map,
       incoming: shots.filter((shot) => shot.owner !== "rival").map(shotView),
       dt,
+      hullGuns: rivalGuns.hullGuns,
+      turretGuns: rivalGuns.turretGuns,
     });
+    if (import.meta.env.DEV) noteAim(rivalCmd);
     stepTank(player, playerCmd, dt);
     stepTank(rival, rivalCmd, dt);
     stepDrones(dt);
@@ -538,11 +569,13 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       if (damage <= 0) {
         const edge = shieldRadius(tank);
         burst(tank.x + ((shot.x - tank.x) / edge) * 8, tank.y + ((shot.y - tank.y) / edge) * 8, PAL.cyan, 5);
+        if (import.meta.env.DEV && shot.owner === "rival" && tank.id === "player") rivalHits += 1;
         return true;
       }
     }
     if (!best) return bubble;
     hurtCell(tank, best.r, best.c, damage);
+    if (import.meta.env.DEV && shot.owner === "rival" && tank.id === "player") rivalHits += 1;
     if (shot.hook) tether = { owner: shot.owner, life: HARPOON_TIME };
     sfxHit();
     return true;
@@ -1773,7 +1806,36 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       droneY: drones.find((drone) => drone.owner === "player" && drone.hp > 0)?.y ?? 0,
       droneAngle: drones.find((drone) => drone.owner === "player" && drone.hp > 0)?.angle ?? 0,
       hull: player.hull,
+      aimSamples,
+      hullOn,
+      turretOn,
+      rivalHits,
+      turnFlips,
+      seconds: aimSamples / 60,
     });
+  }
+
+  function gunFlags(tank: Tank): { hullGuns: boolean; turretGuns: boolean } {
+    const plan = powerPlan(tank.grid);
+    let hullGuns = false;
+    let turretGuns = false;
+    for (const gun of listGuns(tank.grid, tank.hull)) {
+      if (!cellPowered(plan, tank.grid[gun.row]?.[gun.col] ?? null, gun.row, gun.col)) continue;
+      if (gun.mount === "hull") hullGuns = true;
+      else turretGuns = true;
+    }
+    return { hullGuns, turretGuns };
+  }
+
+  function noteAim(cmd: TankCommands): void {
+    if (phase !== "play") return;
+    aimSamples += 1;
+    const bearing = Math.atan2(player.x - rival.x, -(player.y - rival.y));
+    if (Math.abs(angleDelta(rival.angle, bearing)) < (12 * Math.PI) / 180) hullOn += 1;
+    if (Math.abs(angleDelta(rival.turret, bearing)) < (12 * Math.PI) / 180) turretOn += 1;
+    const turn = cmd.turn;
+    if (lastTurn * turn < 0 && Math.abs(turn) > 0.12 && Math.abs(lastTurn) > 0.12) turnFlips += 1;
+    if (Math.abs(turn) > 0.12) lastTurn = turn;
   }
 
   boot();
