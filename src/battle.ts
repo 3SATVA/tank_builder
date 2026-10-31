@@ -30,17 +30,14 @@ import type { ModuleKind } from "./types";
 
 const TURRET_TURN = 4.6;
 const LAVA_DPS = 16;
-const CUTTER_DPS = 28;
-const HARPOON_PULL = 240;
-const HARPOON_TIME = 1.15;
-/** Shield HP added by each generator. Recharge rate also scales with the count. */
-const SHIELD_HP = 80;
+const CUTTER_DPS = 46;
+const HARPOON_PULL = 360;
+const HARPOON_TIME = 2.1;
 const SHIELD_DELAY = 3.5;
-const SHIELD_REGEN = 24;
-const DRONE_HP = 34;
+const DRONE_HP = 20;
 const DRONE_PERIOD = 8;
 const DRONE_FIRST = 0.7;
-const DRONE_DAMAGE = 8;
+const DRONE_DAMAGE = 5;
 const DRONE_LIFE = 1.45;
 const DRONE_SPEED = 188;
 /** Authored module sprites are CELL_ART pixels. On screen each of those maps to an integer run of device pixels. */
@@ -208,6 +205,10 @@ declare global {
   interface Window {
     __TANK_DEBUG__?: () => TankDebug;
     __TANK_SKIP__?: (seconds: number) => TankDebug | undefined;
+    __TANK_DUEL__?: (
+      a: { name: string; hull: string; grid: (string | null)[][] },
+      b: { name: string; hull: string; grid: (string | null)[][] },
+    ) => void;
   }
 }
 
@@ -443,12 +444,12 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
       tank.repairTimer -= dt * bays;
       if (tank.repairTimer <= 0) {
         applyRepair(tank.grid, tank.plate, tank.blueprint, job);
-        tank.repairTimer = 4;
+        tank.repairTimer = 5.5;
         tank.sparkLife = 0.55;
         tank.sparkCells = job.cells.map((cell) => ({ r: cell.r, c: cell.c }));
       }
     } else {
-      tank.repairTimer = 4;
+      tank.repairTimer = 5.5;
     }
     const moving = Math.hypot(tank.vx, tank.vy) > 18;
     if (moving) {
@@ -2081,7 +2082,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
     if (tank.shieldMax <= 0) return;
     if (tank.shieldDelay > 0) tank.shieldDelay = Math.max(0, tank.shieldDelay - dt);
     else if (tank.shield < tank.shieldMax) {
-      tank.shield = Math.min(tank.shieldMax, tank.shield + SHIELD_REGEN * pool.count * dt);
+      tank.shield = Math.min(tank.shieldMax, tank.shield + pool.regen * dt);
     }
   }
 
@@ -2208,7 +2209,7 @@ export function mountBattle(root: HTMLElement, options: BattleOptions): () => vo
           owner: drone.owner,
           color: drone.owner === "player" ? PAL.cyan : PAL.orange,
         });
-        drone.cooldown = 0.55;
+        drone.cooldown = 1.05;
         drone.muzzle = 0.08;
       }
       if (drone.hp <= 0) drones.splice(i, 1);
@@ -2324,7 +2325,7 @@ function spawnTank(
     muzzle: 0,
     puff: 0,
     hull,
-    repairTimer: 4,
+    repairTimer: 5.5,
     sparkLife: 0,
     sparkCells: [],
     grid,
@@ -2338,21 +2339,33 @@ function spawnTank(
   };
 }
 
-function shieldPool(grid: (string | null)[][]): { hp: number; count: number } {
+function shieldCurve(count: number): { hp: number; regen: number } {
+  if (count <= 0) return { hp: 0, regen: 0 };
+  return {
+    hp: Math.round(90 * Math.pow(count, 0.55)),
+    regen: 14 * Math.pow(count, 0.4),
+  };
+}
+
+function shieldPool(grid: (string | null)[][]): { hp: number; regen: number } {
   const plan = powerPlan(grid);
-  let hp = 0;
-  let count = 0;
+  let normal = 0;
+  let bossHp = 0;
+  let bossRegen = 0;
   grid.forEach((row, r) => {
     row.forEach((token, c) => {
       if (!isAnchorCell(token, r, c)) return;
       const mod = cellModule(token);
       if (!mod?.generator) return;
       if ((mod.stats.powerUse ?? 0) > 0 && !plan.powered.has(`${r},${c}`)) return;
-      hp += mod.shieldHp ?? SHIELD_HP;
-      count += 1;
+      if (mod.boss) {
+        bossHp += mod.shieldHp ?? 140;
+        bossRegen += 12;
+      } else normal += 1;
     });
   });
-  return { hp, count };
+  const curve = shieldCurve(normal);
+  return { hp: curve.hp + bossHp, regen: curve.regen + bossRegen };
 }
 
 function launchClocks(grid: (string | null)[][]): Record<string, number> {

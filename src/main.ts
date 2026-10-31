@@ -150,6 +150,32 @@ function show(screen: ScreenId, botId?: string): void {
   });
 }
 
+if (import.meta.env.DEV) {
+  window.__TANK_DUEL__ = (a, b) => {
+    stopBattle?.();
+    document.body.classList.add("in-battle");
+    const host = document.createElement("div");
+    host.className = "screen battle-screen";
+    slot.replaceChildren(host);
+    stopBattle = mountBattle(host, {
+      grid: a.grid,
+      hull: a.hull,
+      rivalName: b.name,
+      rivalHull: b.hull,
+      rivalGrid: b.grid,
+      rivalTuning: ACE_TUNING,
+      driver: ACE_TUNING,
+      scrap: 0,
+      currency: 0,
+      onCurrency: () => {},
+      onWin: () => {},
+      onExit: () => {},
+      onGarage: () => {},
+      onRivals: () => {},
+    });
+  };
+}
+
 /** Stops pinch and double-tap zoom on phones without blocking the joysticks. */
 function installZoomLock(): void {
   const block = (event: Event): void => {

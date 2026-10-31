@@ -35,21 +35,21 @@ Starter blocks sit on a bare hull (28 speed, 18 turning, 36 fuel). Each armor bl
 | Block | Effect |
 | --- | --- |
 | Armor | 48 plate on that cell |
-| Tracks | +36 turning |
+| Tracks | +22 turning |
 | Power | +3 power supply |
-| Fuel | +40 fuel |
-| Engine | +44 speed |
-| Cannon | 16 damage, 0.55 shots/s, uses 1 power |
-| Heavy armor | 96 plate, −30 speed, −12 turning. Shop, 150 scrap |
-| Repair bay | Restores the most hurt block, or rebuilds a destroyed one, every few seconds. Draws 2 power whenever it is mounted. Shop, 200 scrap |
-| Harpoon | 2 cells along the mount. 18 damage, short range, slow reload, pulls the enemy in on a hit. Uses 3 power. Shop |
-| Cutter | Saws enemy blocks and drones that touch it. Uses 1 power. Shop |
-| Medium cannon | 2 cells along the hull (this bay and the one behind it). 28 damage, longer range, 0.30 shots/s, uses 4 power. Both cells must be hull, or both inside the turret. Shop, 250 scrap |
-| Heavy cannon | 3 cells in a line. 46 damage, longer range than the medium, 0.16 shots/s, uses 8 power. All three cells on the hull or all three in the turret. Shop |
-| Robot bay | 2×2. Launches one drone that drives, avoids cover, and shoots the enemy. One drone per bay. The rival can destroy it. Uses 6 power. Shop |
-| Shield generator | 2×2. A bubble absorbs hits, then recharges after a delay. Extra generators add shield HP and recharge faster. Uses 3 power. Shop |
-| Rear turret tank | Same 5×7 size with the 3×3 turret on the back three rows. Own layout. Shop, 300 scrap |
-| Gun deck | No turret. 6 wide × 7 long, more bays than the standard hull, every gun on the hull. Starts empty. Shop |
+| Fuel | +36 fuel |
+| Engine | +30 speed |
+| Cannon | 16 damage, 0.62 shots/s, short range, uses 1 power |
+| Heavy armor | 100 plate, −16 speed, −6 turning. Shop, 150 scrap |
+| Repair bay | Restores the most hurt block, or rebuilds a destroyed one, about every 5.5 seconds. Draws 2 power whenever it is mounted. Shop, 200 scrap |
+| Harpoon | 2 cells along the mount. 22 damage, short range, pulls the enemy in on a hit. Uses 3 power. Shop |
+| Cutter | Saws enemy blocks and drones that touch it, 46 damage per second. Uses 2 power. Shop |
+| Medium cannon | 2 cells along the hull (this bay and the one behind it). 42 damage, longer range, 0.50 shots/s, uses 3 power. Both cells must be hull, or both inside the turret. Shop, 250 scrap |
+| Heavy cannon | 3 cells in a line. 64 damage, one-shots a normal plate, longest range, 0.48 shots/s, uses 5 power. All three cells on the hull or all three in the turret. Shop |
+| Robot bay | 2×2. Launches one light drone that flanks and shoots for 5 damage. One drone per bay. Uses 5 power. Shop |
+| Shield generator | 2×2. The first bubble is the big one. Extra generators add less HP and less recharge. Uses 4 power. Shop |
+| Rear turret tank | Same 5×7 size with the 3×3 turret on the back three rows, so the nose can be armor. Own layout. Shop, 300 scrap |
+| Gun deck | No turret. 6 wide × 7 long, more bays than the standard hull. Every gun faces with the hull, so it suits a committed gun line. Starts empty. Shop |
 
 The four newest shop entries (heavy cannon, robot bay, gun deck, shield generator) share `NEW_SHOP_COST` in `src/modules.ts`. It is 50 scrap while they are being tested. Change that one number to reprice all four.
 
