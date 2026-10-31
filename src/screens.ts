@@ -13,6 +13,7 @@ import {
   isTurretCell,
   moduleIdOf,
   modulesFor,
+  outfitProblem,
   partRole,
   SHOP_ITEMS,
   type PartRole,
@@ -22,6 +23,8 @@ import {
   findOpponent,
   loadLeaderboard,
   publishDefense,
+  scheduleDefense,
+  watchDefense,
   readIdentity,
   readRating,
   registerCallsign,
@@ -620,8 +623,17 @@ export function renderPvp(save: SaveData, go: (screen: ScreenId) => void, onFigh
       const who = el("p", "pvp-identity", `${identity.name} · ${rating === null ? "Unranked" : `rating ${rating}`}`);
       body.append(who);
     }
-    body.append(tankPreview(save), finder(save, onFight));
+    body.append(tankPreview(save));
+    const sync = el("p", "defense-sync", "");
+    sync.setAttribute("role", "status");
+    watchDefense((state) => {
+      sync.textContent = state.note;
+      sync.classList.toggle("illegal", state.status === "illegal");
+      sync.hidden = state.note.length === 0;
+    });
+    body.append(sync, finder(save, onFight));
     root.replaceChildren(bar, body);
+    scheduleDefense(save.hull, activeLayout(save));
   };
   paint();
   return root;
@@ -666,15 +678,24 @@ function finder(save: SaveData, onFight: (launch: PvpLaunch) => void): HTMLEleme
   const wrap = el("div", "shop-list");
   const find = el("button", "btn btn-primary battle-go", "Battle");
   find.type = "button";
-  const status = el("p", "pvp-status", "Posts this tank, then finds a rival.");
+  const status = el("p", "pvp-status", "");
   status.setAttribute("role", "status");
+  status.hidden = true;
   const slot = el("div");
   find.addEventListener("click", () => {
     sfxTap();
+    const layout = activeLayout(save);
+    const problem = outfitProblem(layout);
+    if (problem) {
+      status.hidden = false;
+      status.textContent = problem;
+      return;
+    }
     find.disabled = true;
+    status.hidden = false;
     status.textContent = "Looking for a rival…";
     slot.replaceChildren();
-    void publishDefense(save.hull, activeLayout(save))
+    void publishDefense(save.hull, layout)
       .then(() => "")
       .catch((err: unknown) => (err instanceof Error ? err.message : "Defense wasn't posted."))
       .then((note) => {
