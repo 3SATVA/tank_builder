@@ -131,7 +131,7 @@ export function computeStats(grid: ReadonlyArray<ReadonlyArray<string | null>>):
       if (mod.kind === "armor") plates += 1;
       if (mod.kind === "weapon") {
         weaponCount += 1;
-        if (running && !mod.cutter) {
+        if (running && !mod.cutter && !mod.mine && !mod.missile && !mod.ability) {
           shooters += 1;
           damageSum += mod.stats.damage ?? 0;
           fireRate += mod.stats.fireRate ?? 0;

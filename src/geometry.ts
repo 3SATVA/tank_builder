@@ -26,6 +26,8 @@ export interface GunMount {
   siege: boolean;
   /** Spears the target and reels it in. */
   hook: boolean;
+  splash: number;
+  splashDamage: number;
 }
 
 export function listGuns(grid: ReadonlyArray<ReadonlyArray<string | null>>, hull = "standard"): GunMount[] {
@@ -39,7 +41,7 @@ export function listGuns(grid: ReadonlyArray<ReadonlyArray<string | null>>, hull
       const anchor = token.split("@")[1];
       if (anchor && anchor !== `${row},${col}`) continue;
       const mod = getModule(token.split("@")[0] ?? "");
-      if (!mod || mod.kind !== "weapon" || mod.cutter) continue;
+      if (!mod || mod.kind !== "weapon" || mod.cutter || mod.mine || mod.missile || mod.ability) continue;
       const center = cellCenter(col, row, cols, rows);
       guns.push({
         damage: mod.stats.damage ?? 0,
@@ -52,6 +54,8 @@ export function listGuns(grid: ReadonlyArray<ReadonlyArray<string | null>>, hull
         heavy: (mod.rows ?? 1) > 1 && !mod.hook,
         siege: (mod.rows ?? 1) >= 3,
         hook: Boolean(mod.hook),
+        splash: mod.splash ?? 0,
+        splashDamage: mod.splashDamage ?? 0,
       });
     }
   }
