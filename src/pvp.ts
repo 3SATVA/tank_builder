@@ -212,15 +212,65 @@ export function readOpponentLayout(hullRaw: unknown, layoutRaw: unknown): { hull
 
 let defenseTimer = 0;
 
-/** Posts the selected hull after a short pause. Skips quietly when offline, unsigned-in, or not fight-ready. */
+export type DefenseSync = "idle" | "syncing" | "defending" | "illegal" | "offline";
+
+export interface DefenseState {
+  status: DefenseSync;
+  note: string;
+}
+
+let defenseState: DefenseState = { status: "idle", note: "" };
+let defenseWatcher: ((state: DefenseState) => void) | null = null;
+
+function setDefense(status: DefenseSync, note: string): void {
+  defenseState = { status, note };
+  defenseWatcher?.(defenseState);
+}
+
+/** The PvP tab listens so the label can change without rebuilding the screen. */
+export function watchDefense(listener: (state: DefenseState) => void): void {
+  defenseWatcher = listener;
+  listener(defenseState);
+}
+
+/**
+ * Posts the equipped hull after a short pause.
+ * An illegal tank is not replaced with another build. Offline and signed-out skips stay quiet
+ * except for the status the PvP tab shows.
+ */
 export function scheduleDefense(hull: string, grid: ReadonlyArray<ReadonlyArray<string | null>>): void {
   const snapshot = grid.map((row) => row.slice());
   window.clearTimeout(defenseTimer);
+  const problem = outfitProblem(snapshot);
+  if (problem) {
+    setDefense("illegal", problem);
+    return;
+  }
+  if (!readIdentity()) {
+    setDefense("idle", "");
+    return;
+  }
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    setDefense("offline", "Offline");
+    return;
+  }
+  setDefense("syncing", "Syncing");
   defenseTimer = window.setTimeout(() => {
-    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
-    if (!readIdentity()) return;
-    if (outfitProblem(snapshot)) return;
-    void publishDefense(hull, snapshot).catch(() => {});
+    if (!readIdentity()) {
+      setDefense("idle", "");
+      return;
+    }
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      setDefense("offline", "Offline");
+      return;
+    }
+    if (outfitProblem(snapshot)) {
+      setDefense("illegal", outfitProblem(snapshot) ?? "");
+      return;
+    }
+    void publishDefense(hull, snapshot)
+      .then(() => setDefense("defending", "Defending"))
+      .catch(() => setDefense("offline", "Couldn't sync"));
   }, 800);
 }
 

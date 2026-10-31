@@ -582,6 +582,21 @@ h2 {
   font-weight: 800;
   font-size: 1.05rem;
 }
+.defense-sync {
+  margin: 0;
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.defense-sync.illegal {
+  letter-spacing: 0.01em;
+  text-transform: none;
+  font-size: 0.85rem;
+  color: var(--amber);
+}
 .tank-preview { width: min(100%, 300px); margin: 0 auto; }
 .battle-go { min-height: 76px; font-size: 1.2rem; width: 100%; }
 .tab-bar {
@@ -1095,6 +1110,8 @@ html[data-art="pixel"] .tab-icon {
   line-height: 1;
 }
 html[data-art="pixel"] .tab-label { font-size: 7px; letter-spacing: 0; }
+html[data-art="pixel"] .defense-sync { font-size: 7px; letter-spacing: 0; }
+html[data-art="pixel"] .defense-sync.illegal { font-size: 8px; }
 html[data-art="pixel"] .boss-tag { border-radius: 0; font-size: 7px; padding: 3px 4px; }
 html[data-art="pixel"] .no-power::after { transform: none; }
 html[data-art="pixel"] .joystick-base {

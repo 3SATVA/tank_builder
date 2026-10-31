@@ -20,6 +20,7 @@ const tabs = renderTabs((id) => show(id));
 app.append(slot, tabs.element);
 
 const save = loadSave();
+scheduleDefense(save.hull, activeLayout(save));
 let stopBattle: (() => void) | null = null;
 let opponentId = "rookie";
 let outfitNote = "";
