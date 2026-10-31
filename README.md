@@ -38,7 +38,7 @@ Starter blocks sit on a bare hull (28 speed, 18 turning, 36 fuel). Each armor bl
 | Tracks | +22 turning |
 | Power | +3 power supply |
 | Fuel | +36 fuel |
-| Engine | +30 speed |
+| Engine | +60 speed. The hull's top speed stops rising after 200, so a pile of engines does not run away |
 | Cannon | 13 damage, 0.62 shots/s, short range, uses 1 power |
 | Heavy armor | 100 plate, −16 speed, −6 turning. Shop, 150 scrap |
 | Repair bay | Restores the most hurt block, or rebuilds a destroyed one, about every 5.5 seconds. Draws 2 power whenever it is mounted. Shop, 200 scrap |
