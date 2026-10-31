@@ -47,6 +47,8 @@ export interface TankControlContext {
   hullGuns?: boolean;
   /** A powered gun sits on a turret and tracks the aim point on its own. */
   turretGuns?: boolean;
+  /** Sudden-death circle. Null until the zone exists. */
+  zone?: { x: number; y: number; r: number } | null;
 }
 
 export interface TankController {
@@ -243,6 +245,19 @@ export function createBotController(tuning: BotTuning): TankController {
             const spot = approach(ctx.self.x, ctx.self.y, foe.x, foe.y, (near + far) / 2, ctx.arena);
             begin("go", spot.x, spot.y, COMMIT, true);
           }
+        }
+      }
+
+      const zone = ctx.zone;
+      if (zone) {
+        const zx = zone.x - ctx.self.x;
+        const zy = zone.y - ctx.self.y;
+        const zd = Math.hypot(zx, zy);
+        if (zd > zone.r * 0.72) {
+          mode = "go";
+          const step = Math.max(36, zd - zone.r * 0.4);
+          goalX = ctx.self.x + (zx / zd) * step;
+          goalY = ctx.self.y + (zy / zd) * step;
         }
       }
 

@@ -31,7 +31,7 @@ import {
   type PvpLaunch,
 } from "./pvp";
 import { activeLayout, purchase } from "./save";
-import { sfxTap } from "./sfx";
+import { setSoundEnabled, sfxTap, soundEnabled } from "./sfx";
 import { cellPowered, computeStats, mobilityWarning, powerPlan } from "./stats";
 import type { ModuleDef, SaveData, ShopItem, TankStats } from "./types";
 
@@ -110,7 +110,17 @@ export function renderGarage(
       sfxTap();
       go("battle");
     });
-    bar.append(el("span", "brand", "Garage"), scrapPill(save.currency), drive);
+    const sound = el("button", "btn btn-ghost sound-toggle", soundEnabled() ? "🔊" : "🔇");
+    sound.type = "button";
+    sound.setAttribute("aria-label", soundEnabled() ? "Sound on" : "Sound off");
+    sound.setAttribute("aria-pressed", soundEnabled() ? "true" : "false");
+    sound.addEventListener("click", () => {
+      const next = !soundEnabled();
+      setSoundEnabled(next);
+      if (next) sfxTap();
+      paint();
+    });
+    bar.append(el("span", "brand", "Garage"), scrapPill(save.currency), sound, drive);
 
     const layout = el("div", "garage-layout");
     layout.append(
