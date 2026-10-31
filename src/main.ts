@@ -164,8 +164,8 @@ if (import.meta.env.DEV) {
       rivalName: b.name,
       rivalHull: b.hull,
       rivalGrid: b.grid,
-      rivalTuning: ACE_TUNING,
-      driver: ACE_TUNING,
+      rivalTuning: b.tuning ?? ACE_TUNING,
+      driver: a.tuning ?? ACE_TUNING,
       scrap: 0,
       currency: 0,
       onCurrency: () => {},
@@ -174,6 +174,10 @@ if (import.meta.env.DEV) {
       onGarage: () => {},
       onRivals: () => {},
     });
+  };
+  window.__TANK_BOT__ = (id) => {
+    const bot = getBot(id);
+    return { name: bot.name, hull: bot.hull, grid: bot.grid, tuning: bot.tuning };
   };
 }
 
