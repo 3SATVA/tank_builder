@@ -952,6 +952,34 @@ body.in-battle .tab-bar { display: none; }
 }
 .map-banner.is-on { animation: map-banner 2.6s ease forwards; }
 .map-banner[hidden] { display: none; }
+.sudden-banner {
+  position: absolute;
+  z-index: 3;
+  top: 18%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 10px 16px;
+  background: rgba(90, 16, 12, 0.92);
+  border: 3px solid #ffb703;
+  border-radius: 12px;
+  color: #fff6e8;
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  pointer-events: none;
+  opacity: 0;
+}
+.sudden-banner.is-on { animation: map-banner 2.8s ease forwards; }
+.sudden-banner[hidden] { display: none; }
+.sound-toggle {
+  min-width: 44px;
+  padding: 8px 10px;
+  font-size: 1.05rem;
+  letter-spacing: 0;
+  text-transform: none;
+}
 @keyframes map-banner {
   0% { opacity: 0; }
   14% { opacity: 1; }
